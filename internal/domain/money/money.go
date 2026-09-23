@@ -120,7 +120,10 @@ func (m Money) String() string {
 	if abs < 0 {
 		sign = "-"
 		if abs == math.MinInt64 {
-			return fmt.Sprintf("-%d.%02d", -(math.MinInt64/100), -(math.MinInt64%100))
+			minVal := int64(math.MinInt64)
+			intP := -(minVal / 100)
+			decP := -(minVal % 100)
+			return fmt.Sprintf("-%d.%02d", intP, decP)
 		}
 		abs = -abs
 	}
