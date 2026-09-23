@@ -84,5 +84,25 @@
       "client": "desafio-internal",
       "roles": ["internal"]
     }
+  ],
+  "users": [
+    {
+      "username": "service-account-desafio-internal",
+      "enabled": true,
+      "serviceAccountClientId": "desafio-internal",
+      "realmRoles": ["internal"]
+    },
+    {
+      "username": "service-account-provider-a",
+      "enabled": true,
+      "serviceAccountClientId": "provider-a",
+      "realmRoles": ["provider"]
+    },
+    {
+      "username": "service-account-provider-b",
+      "enabled": true,
+      "serviceAccountClientId": "provider-b",
+      "realmRoles": ["provider"]
+    }
   ]
 }

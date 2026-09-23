@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -60,6 +61,8 @@ type ShutdownConfig struct {
 
 // lê e valida a configuração
 func Load() (*Config, error) {
+	loadDotEnv()
+
 	cfg := &Config{
 		HTTP: HTTPConfig{
 			Port: getEnvOrDefault("HTTP_PORT", "3000"),
@@ -136,4 +139,29 @@ func getEnvDuration(key string, defaultVal time.Duration) time.Duration {
 		return defaultVal
 	}
 	return d
+}
+
+func loadDotEnv() {
+	for _, filename := range []string{".env", ".env.example"} {
+		data, err := os.ReadFile(filename)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				k := strings.TrimSpace(parts[0])
+				v := strings.TrimSpace(parts[1])
+				if os.Getenv(k) == "" {
+					_ = os.Setenv(k, v)
+				}
+			}
+		}
+		break
+	}
 }

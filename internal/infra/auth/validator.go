@@ -34,6 +34,13 @@ func (c *Claims) HasRole(role string) bool {
 			return true
 		}
 	}
+	// Mapeamento baseado no azp (Client ID autenticado pelo IdP)
+	if role == "internal" && (c.ClientID == "desafio-internal" || c.ClientID == "internal-admin") {
+		return true
+	}
+	if role == "provider" && strings.HasPrefix(c.ClientID, "provider-") {
+		return true
+	}
 	return false
 }
 

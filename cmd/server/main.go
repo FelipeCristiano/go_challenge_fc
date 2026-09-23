@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -52,7 +53,7 @@ func main() {
 
 		// 5. Autenticação e Handlers HTTP
 		fx.Provide(provideAuthValidator),
-		fx.Provide(handler.NewHealthHandler),
+		fx.Provide(provideHealthHandler),
 		fx.Provide(handler.NewWalletHandler),
 		fx.Provide(handler.NewWagerHandler),
 		fx.Provide(apphttp.NewRouter),
@@ -146,6 +147,10 @@ func provideUseCases(
 
 func provideAuthValidator(cfg *config.Config) auth.TokenValidator {
 	return auth.NewKeycloakValidator(cfg.Auth.JWKSURL, cfg.Auth.Issuer)
+}
+
+func provideHealthHandler(pool *pgxpool.Pool, sqsClient *awssqs.Client) *handler.HealthHandler {
+	return handler.NewHealthHandlerWithSQS(pool, sqsClient)
 }
 
 func provideSQSClient(cfg *config.Config) (*awssqs.Client, error) {
@@ -242,21 +247,35 @@ func registerLifecycleHooks(
 				slog.Warn("http server shutdown error", "error", err)
 			}
 
-			// 2. Finaliza workers em background com drain
-			slog.Info("stopping sqs consumer")
-			if err := sqsConsumer.Stop(shutdownCtx); err != nil {
-				slog.Warn("sqs consumer stop error", "error", err)
-			}
+			// 2. Finaliza workers em background em paralelo com drain
+			var wg sync.WaitGroup
+			wg.Add(3)
 
-			slog.Info("stopping outbox worker")
-			if err := outboxWorker.Stop(shutdownCtx); err != nil {
-				slog.Warn("outbox worker stop error", "error", err)
-			}
+			go func() {
+				defer wg.Done()
+				slog.Info("stopping sqs consumer")
+				if err := sqsConsumer.Stop(shutdownCtx); err != nil {
+					slog.Warn("sqs consumer stop error", "error", err)
+				}
+			}()
 
-			slog.Info("stopping pending references worker")
-			if err := pendingRefWorker.Stop(shutdownCtx); err != nil {
-				slog.Warn("pending references worker stop error", "error", err)
-			}
+			go func() {
+				defer wg.Done()
+				slog.Info("stopping outbox worker")
+				if err := outboxWorker.Stop(shutdownCtx); err != nil {
+					slog.Warn("outbox worker stop error", "error", err)
+				}
+			}()
+
+			go func() {
+				defer wg.Done()
+				slog.Info("stopping pending references worker")
+				if err := pendingRefWorker.Stop(shutdownCtx); err != nil {
+					slog.Warn("pending references worker stop error", "error", err)
+				}
+			}()
+
+			wg.Wait()
 
 			slog.Info("application shutdown complete")
 			return nil

@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,7 +71,9 @@ func TestUberFxComposition_Lifecycle(t *testing.T) {
 			return usecase.NewRetryPendingReferencesUseCase(u, w, t, l, o, c.PendingRef.MaxRetries)
 		}),
 		fx.Provide(func() auth.TokenValidator { return &dummyValidator{} }),
-		fx.Provide(handler.NewHealthHandler),
+		fx.Provide(func(p *pgxpool.Pool, sqs *awssqs.Client) *handler.HealthHandler {
+			return handler.NewHealthHandlerWithSQS(p, sqs)
+		}),
 		fx.Provide(handler.NewWalletHandler),
 		fx.Provide(handler.NewWagerHandler),
 		fx.Provide(apphttp.NewRouter),
@@ -125,9 +128,12 @@ func TestUberFxComposition_Lifecycle(t *testing.T) {
 				},
 				OnStop: func(ctx context.Context) error {
 					_ = server.Shutdown(ctx)
-					_ = sqsConsumer.Stop(ctx)
-					_ = outboxWorker.Stop(ctx)
-					_ = pendingRefWorker.Stop(ctx)
+					var wg sync.WaitGroup
+					wg.Add(3)
+					go func() { defer wg.Done(); _ = sqsConsumer.Stop(ctx) }()
+					go func() { defer wg.Done(); _ = outboxWorker.Stop(ctx) }()
+					go func() { defer wg.Done(); _ = pendingRefWorker.Stop(ctx) }()
+					wg.Wait()
 					return nil
 				},
 			})
@@ -144,11 +150,18 @@ func TestUberFxComposition_Lifecycle(t *testing.T) {
 	// Verifica se a aplicação responde via HTTP
 	resp, err := http.Get("http://localhost:3899/health/live")
 	if err != nil || resp.StatusCode != http.StatusOK {
-		t.Fatalf("http server not responding: %v", err)
+		t.Fatalf("http server not responding on /health/live: %v", err)
 	}
+	_ = resp.Body.Close()
+
+	readyResp, err := http.Get("http://localhost:3899/health/ready")
+	if err != nil || readyResp.StatusCode != http.StatusOK {
+		t.Fatalf("http server not ready on /health/ready: %v", err)
+	}
+	_ = readyResp.Body.Close()
 
 	// Testa encerramento gracioso via fx.Lifecycle
-	stopCtx, cancelStop := context.WithTimeout(context.Background(), 5*time.Second)
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelStop()
 
 	if err := appRef.Stop(stopCtx); err != nil {

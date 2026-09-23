@@ -17,6 +17,9 @@ import (
 	"github.com/felipecristiano/desafio/internal/domain/wallet"
 	"github.com/felipecristiano/desafio/internal/infra/observability"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type ProcessWagerInput struct {
@@ -75,16 +78,34 @@ func NewProcessWagerUseCase(
 }
 
 func (uc *ProcessWagerUseCase) Execute(ctx context.Context, input ProcessWagerInput) (output *ProcessWagerOutput, err error) {
+	ctx, span := observability.StartSpan(ctx, "usecase.ProcessWager",
+		trace.WithAttributes(
+			attribute.String("wager.kind", string(input.Kind)),
+			attribute.String("wager.provider_id", input.ProviderID),
+			attribute.String("wager.external_transaction_id", input.ExternalTransactionID),
+			attribute.String("wager.wallet_id", input.WalletID.String()),
+			attribute.String("wager.player_id", input.PlayerID.String()),
+			attribute.String("wager.source", input.Source),
+		),
+	)
+	defer span.End()
+
 	start := time.Now()
 	defer func() {
 		dur := time.Since(start).Seconds()
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			observability.WagerTransactionsTotal.WithLabelValues("FAILED", string(input.Kind), input.Source).Inc()
 			observability.WagerProcessingDurationSeconds.WithLabelValues(string(input.Kind), input.Source, "FAILED").Observe(dur)
 			if errors.Is(err, errs.ErrPayloadConflict) {
 				observability.WagerConcurrencyConflictsTotal.WithLabelValues("process_wager", "payload_conflict").Inc()
 			}
 		} else if output != nil {
+			span.SetAttributes(
+				attribute.String("wager.status", string(output.Status)),
+				attribute.Bool("wager.idempotent_replay", output.IdempotentReplay),
+			)
 			observability.WagerTransactionsTotal.WithLabelValues(string(output.Status), string(input.Kind), input.Source).Inc()
 			observability.WagerProcessingDurationSeconds.WithLabelValues(string(input.Kind), input.Source, string(output.Status)).Observe(dur)
 			if output.IdempotentReplay {
