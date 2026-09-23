@@ -7,11 +7,16 @@
 bin/
 dist/
 /server
+/loadtest
+__debug_bin*
 
 # Binários e perfis de teste
 *.test
 *.out
+*.prof
+*.pprof
 coverage.*
+coverage/
 *.coverprofile
 profile.cov
 
