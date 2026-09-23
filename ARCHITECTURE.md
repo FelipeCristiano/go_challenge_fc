@@ -254,8 +254,8 @@ O encerramento ordenado é gerenciado pelos hooks de `fx.Lifecycle`:
    - [x] Fase 1: Infraestrutura (Docker Compose, PostgreSQL, LocalStack, Keycloak, Migrations)
    - [x] Fase 2: Modelo de Domínio (`Money`, `Wallet`, `WagerTransaction`, `WalletLedgerEntry`, `Events`, `Inbox`, `Outbox`)
    - [x] Fase 3: Persistência (`pgx/v5`, Repositórios SQL, Unit of Work, Testes de Integração)
+   - [x] Fase 4: Casos de uso (`OpenWallet`, `ProcessWager`, `ReconcileWallet`, `RetryPendingReferences`)
 5. **Trabalho a Seguir**:
-   - [ ] Fase 4: Casos de uso (Application Layer)
    - [ ] Fase 5: API HTTP e Handlers
    - [ ] Fase 6: Consumidor SQS
    - [ ] Fase 7: Outbox Worker

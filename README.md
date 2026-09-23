@@ -53,28 +53,67 @@ docker compose --profile app up --build
 
 ## Testes
 
+Os testes são organizados entre testes unitários (puros, sem I/O ou dependências externas) e testes de integração (exercitando PostgreSQL real via Docker Compose).
+
+### 1. Testes Unitários de Domínio (rápidos, sem containers)
+
+Cobrem parsing monetário sem floats, regras de negócio dos 5 tipos de aposta, cálculo de hash canônico e invariantes aritméticas do ledger:
+
 ```sh
-# Todos os testes
-go test ./...
+# Executar todos os testes unitários
+go test -v ./internal/domain/...
 
-# Com detector de race conditions
-go test -race ./...
+# Executar testes unitários específicos
+go test -v ./internal/domain/money/...
+go test -v ./internal/domain/wallet/...
+go test -v ./internal/domain/transaction/...
+go test -v ./internal/domain/ledger/...
+```
 
-# Vet
+### 2. Análise Estática (Vet)
+
+```sh
 go vet ./...
 ```
 
-### Testes de integração
+### 3. Teste com Detector de Condições de Corrida (`-race`)
 
-Requerem PostgreSQL, LocalStack e Keycloak rodando:
+> **Nota para Windows**: Em ambientes com arquitetura de 32 bits (`windows/386`), defina explicitamente `GOARCH=amd64` caso sua máquina seja 64 bits.
 
 ```sh
-docker compose up -d postgres keycloak localstack
-docker compose run --rm migrate
-go test -tags=integration ./...
+# No PowerShell (Windows):
+$env:GOARCH="amd64"
+go test -race ./internal/domain/...
+
+# No Linux / macOS / Bash:
+GOARCH=amd64 go test -race ./internal/domain/...
 ```
 
-### Múltiplas instâncias
+### 4. Testes de Integração (com Containers Reais)
+
+Exercitam a camada de persistência com `pgx/v5` e os casos de uso ponta a ponta (concorrência de 2 apostas de 80.00 sobre saldo de 100.00, idempotência, reversões antecipadas e reconciliação):
+
+```sh
+# 1. Certifique-se de que o PostgreSQL está rodando e migrado
+docker compose up -d postgres
+docker compose run --rm migrate
+
+# 2. Executar testes de integração
+# No PowerShell:
+$env:GOARCH="amd64"
+go test -v -tags=integration ./...
+
+# No Linux / Bash:
+GOARCH=amd64 go test -v -tags=integration ./...
+
+# Executar apenas testes de integração dos casos de uso:
+go test -v -tags=integration ./internal/application/usecase/...
+
+# Executar apenas testes de integração dos repositórios pgx:
+go test -v -tags=integration ./internal/infra/db/postgres/...
+```
+
+### 5. Cenário de Execução com Múltiplas Instâncias
 
 ```sh
 HTTP_PORT=3001 go run ./cmd/server &
