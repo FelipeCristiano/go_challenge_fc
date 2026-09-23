@@ -117,6 +117,9 @@ go test -v -tags=integration ./internal/http/...
 
 # Executar testes de integração do Consumidor SQS FIFO:
 go test -v -tags=integration ./internal/worker/sqs/...
+
+# Executar testes de integração do Outbox Worker:
+go test -v -tags=integration ./internal/worker/outbox/...
 ```
 
 ### 5. Cenário de Execução com Múltiplas Instâncias

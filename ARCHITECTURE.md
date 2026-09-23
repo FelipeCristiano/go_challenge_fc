@@ -275,8 +275,8 @@ O encerramento ordenado é gerenciado pelos hooks de `fx.Lifecycle`:
    - [x] Fase 4: Casos de uso (`OpenWallet`, `ProcessWager`, `ReconcileWallet`, `RetryPendingReferences`)
    - [x] Fase 5: API HTTP e Handlers (`chi`, autenticação OIDC/JWKS, autorização por role/providerId, health checks)
    - [x] Fase 6: Consumidor SQS (Worker FIFO assíncrono, deduplicação Inbox, remoção pós-commit, liberação de visibilidade)
+   - [x] Fase 7: Outbox Worker (Publicador com FOR UPDATE SKIP LOCKED, backoff exponencial, deduplicação estável por eventId)
 5. **Trabalho a Seguir**:
-   - [ ] Fase 7: Outbox Worker
    - [ ] Fase 8: Composição Fx
    - [ ] Fase 9: Observabilidade completa
    - [ ] Fase 10: Testes distribuídos de concorrência e recuperação
