@@ -78,10 +78,10 @@ go vet ./...
 
 ### 3. Teste com Detector de Condições de Corrida (`-race`)
 
-> **Nota para Windows**: Em ambientes com arquitetura de 32 bits (`windows/386`), defina explicitamente `GOARCH=amd64` caso sua máquina seja 64 bits.
+> **Nota**: O detector de condições de corrida (`-race`) exige CGO habilitado e um compilador C (`gcc`). Em ambientes Linux / macOS / CI ou Windows com MinGW configurado:
 
 ```sh
-# No PowerShell (Windows):
+# No PowerShell (Windows com MinGW / 64-bit):
 $env:GOARCH="amd64"
 go test -race ./internal/domain/...
 
@@ -98,13 +98,16 @@ Exercitam a camada de persistência com `pgx/v5` e os casos de uso ponta a ponta
 docker compose up -d postgres
 docker compose run --rm migrate
 
-# 2. Executar testes de integração
+# 2. Executar todos os testes de integração
 # No PowerShell:
 $env:GOARCH="amd64"
 go test -v -tags=integration ./...
 
 # No Linux / Bash:
 GOARCH=amd64 go test -v -tags=integration ./...
+
+# Executar testes unitários de métricas e observabilidade:
+go test -v ./internal/infra/observability/...
 
 # Executar apenas testes de integração dos casos de uso:
 go test -v -tags=integration ./internal/application/usecase/...
@@ -120,6 +123,9 @@ go test -v -tags=integration ./internal/worker/sqs/...
 
 # Executar testes de integração do Outbox Worker:
 go test -v -tags=integration ./internal/worker/outbox/...
+
+# Executar teste de composição Uber Fx e ciclo de vida:
+go test -v -tags=integration ./cmd/server/...
 ```
 
 ### 5. Cenário de Execução com Múltiplas Instâncias
@@ -169,18 +175,22 @@ curl -s -X POST http://localhost:3000/wagering/transactions \
   }' | jq
 ```
 
-### Health checks
-
+### Health checks e Métricas
+ 
 ```sh
+# Health checks
 curl http://localhost:3000/health/live
 curl http://localhost:3000/health/ready
+
+# Métricas Prometheus
+curl http://localhost:3000/metrics
 ```
 
 ## Estrutura do Projeto
 
 ```
 desafio/
-├── cmd/server/          # Entrypoint da aplicação
+├── cmd/server/          # Entrypoint da aplicação e composição Fx
 ├── internal/
 │   ├── domain/          # Domínio puro (sem dependências externas)
 │   │   ├── money/       # Value object Money (int64 centavos)
@@ -191,22 +201,25 @@ desafio/
 │   │   ├── inbox/       # Modelo InboxMessage
 │   │   └── outbox/      # Modelo OutboxEvent
 │   ├── application/
-│   │   └── usecase/     # Casos de uso (orquestração)
+│   │   ├── port/        # Interfaces de repositórios e Unit of Work
+│   │   └── usecase/     # Casos de uso e regras de negócio
 │   ├── infra/
-│   │   ├── config/      # Configuração via env vars
+│   │   ├── auth/        # Validação JWT Keycloak (JWKS)
+│   │   ├── config/      # Leitura e validação de env vars
 │   │   ├── db/
 │   │   │   ├── migrations/  # Migrations SQL versionadas
-│   │   │   └── postgres/    # Pool pgx + runner de migrations
-│   │   ├── sqs/         # Cliente SQS (LocalStack)
-│   │   ├── auth/        # Validação JWT Keycloak
-│   │   └── outbox/      # Worker de publicação outbox
+│   │   │   └── postgres/    # Pool pgx + repositórios PostgreSQL
+│   │   └── observability/   # Métricas Prometheus e logger JSON
 │   ├── http/
 │   │   ├── handler/     # HTTP handlers
-│   │   └── middleware/  # Auth, logging, recovery
-│   └── fx/              # Módulos Uber Fx
+│   │   └── middleware/  # Auth, logging, correlation, recovery
+│   └── worker/
+│       ├── outbox/      # Worker de publicação da outbox (SKIP LOCKED)
+│       ├── pendingref/  # Worker de resolução de referências pendentes
+│       └── sqs/         # Consumidor SQS FIFO com deduplicação Inbox
 ├── scripts/
 │   ├── keycloak/        # Realm export para auto-import
-│   └── localstack/      # Script de provisionamento SQS
+│   └── localstack/      # Script de provisionamento SQS FIFO
 ├── docker-compose.yml
 ├── Dockerfile
 ├── .env.example

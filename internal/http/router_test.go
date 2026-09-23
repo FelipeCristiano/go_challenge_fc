@@ -97,6 +97,11 @@ func TestHTTPAPI_EndToEnd(t *testing.T) {
 		t.Fatalf("health ready failed: status=%d, err=%v", resp.StatusCode, err)
 	}
 
+	resp, err = http.Get(server.URL + "/metrics")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("metrics endpoint failed: status=%d, err=%v", resp.StatusCode, err)
+	}
+
 	// 2. Abertura de Carteira: POST /wallets
 	playerID := uuid.New()
 	openReqBody := map[string]any{

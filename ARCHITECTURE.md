@@ -251,15 +251,21 @@ O encerramento ordenado é gerenciado pelos hooks de `fx.Lifecycle`:
 
 ## 11. Observabilidade
 
-- **Logs JSON Estruturados**: Implementados via `log/slog`. Cada log de transação inclui `correlationId`, `messageId`, `transactionId`, `walletId` e `providerId`. Nenhuma credencial ou dado sensível é logado.
-- **Métricas Prometheus**:
-  - `wager_transactions_total`: Contador por status (`PROCESSED`, `REJECTED`, `FAILED`) e tipo (`BET`, `WIN`, etc.).
-  - `wager_transactions_duplicates_total`: Contagem de tentativas duplicadas.
-  - `outbox_publish_delay_seconds`: Histograma de atraso de publicação da outbox.
-  - `reconciliation_divergences_total`: Divergências detectadas pelo endpoint de reconciliação.
+- **Logs JSON Estruturados**: Implementados via `log/slog`. Cada log de transação inclui os identificadores de rastreabilidade: `correlationId`, `messageId`, `transactionId`, `walletId` e `providerId`. Nenhuma credencial, segredo ou payload financeiro bruto é exposto.
+- **Métricas Prometheus** (expostas via `GET /metrics` no pacote `internal/infra/observability`):
+  - `wager_transactions_total`: Contador por status (`PROCESSED`, `REJECTED`, `PENDING_REFERENCE`, `FAILED`), tipo (`BET`, `WIN`, `LOSS`, `REFUND`, `ROLLBACK`) e origem (`HTTP`, `SQS`).
+  - `wager_processing_duration_seconds`: Histograma de latência de processamento particionado por tipo, origem e status.
+  - `wager_transactions_duplicates_total`: Contagem de requisições duplicadas identificadas (`idempotent_replay`, `inbox_duplicate`).
+  - `wager_retries_total`: Retentativas efetuadas por worker (`sqs`, `outbox`, `pending_ref`) e resultado (`success`, `failure`, `retry`, `max_reached`).
+  - `wager_dlq_messages_total`: Mensagens descartadas ou direcionadas para DLQ (`poison_pill`, `terminal_domain_error`, `max_retries_exceeded`).
+  - `wager_concurrency_conflicts_total`: Conflitos de concorrência ou payload conflict detectados (`process_wager`, `payload_conflict`).
+  - `outbox_publish_delay_seconds`: Histograma do atraso em segundos entre a ocorrência do evento de domínio (`occurredAt`) e sua publicação no SQS FIFO.
+  - `outbox_published_events_total`: Total de eventos publicados pela outbox por `event_type` e `status` (`success`, `failure`).
+  - `reconciliation_checks_total`: Total de verificações de reconciliação de saldo executadas por status (`ok`, `divergent`).
+  - `reconciliation_divergences_total`: Total de divergências financeiras detectadas por moeda (`currency`).
 - **Health Checks**:
-  - `GET /health/live`: Liveness do processo Go.
-  - `GET /health/ready`: Readiness validando conectividade com PostgreSQL e LocalStack SQS.
+  - `GET /health/live`: Liveness do processo Go (status `UP`).
+  - `GET /health/ready`: Readiness validando conectividade com PostgreSQL (`SELECT 1`).
 
 ---
 
@@ -276,7 +282,7 @@ O encerramento ordenado é gerenciado pelos hooks de `fx.Lifecycle`:
    - [x] Fase 5: API HTTP e Handlers (`chi`, autenticação OIDC/JWKS, autorização por role/providerId, health checks)
    - [x] Fase 6: Consumidor SQS (Worker FIFO assíncrono, deduplicação Inbox, remoção pós-commit, liberação de visibilidade)
    - [x] Fase 7: Outbox Worker (Publicador com FOR UPDATE SKIP LOCKED, backoff exponencial, deduplicação estável por eventId)
+   - [x] Fase 8: Composição Uber Fx (`cmd/server/main.go`, injeção de dependência e hooks de ciclo de vida com shutdown gracioso)
+   - [x] Fase 9: Observabilidade completa (Métricas Prometheus via `/metrics`, rastreabilidade JSON por `slog`, health checks)
 5. **Trabalho a Seguir**:
-   - [ ] Fase 8: Composição Fx
-   - [ ] Fase 9: Observabilidade completa
    - [ ] Fase 10: Testes distribuídos de concorrência e recuperação

@@ -13,6 +13,7 @@ import (
 	"github.com/felipecristiano/desafio/internal/domain/money"
 	"github.com/felipecristiano/desafio/internal/domain/outbox"
 	"github.com/felipecristiano/desafio/internal/domain/transaction"
+	"github.com/felipecristiano/desafio/internal/infra/observability"
 )
 
 type RetryPendingReferencesUseCase struct {
@@ -71,6 +72,7 @@ func (uc *RetryPendingReferencesUseCase) processSinglePending(ctx context.Contex
 	return uc.uow.WithTx(ctx, func(tx port.DBTX) error {
 		// Se excedeu o máximo de retentativas, finaliza como REJECTED
 		if txn.RetryCount() >= uc.maxRetries {
+			observability.WagerRetriesTotal.WithLabelValues("pending_ref", "max_reached").Inc()
 			failCode := errs.CodeReferenceNotFound
 			if err := txn.MarkRejected(failCode); err != nil {
 				return err
@@ -108,6 +110,7 @@ func (uc *RetryPendingReferencesUseCase) processSinglePending(ctx context.Contex
 
 		// Se a referência ainda não existe, calcula próximo backoff exponencial
 		if refTxn == nil {
+			observability.WagerRetriesTotal.WithLabelValues("pending_ref", "retry").Inc()
 			nextDelay := time.Duration(1<<txn.RetryCount()) * time.Second
 			if nextDelay > 60*time.Second {
 				nextDelay = 60 * time.Second
@@ -127,6 +130,7 @@ func (uc *RetryPendingReferencesUseCase) processSinglePending(ctx context.Contex
 		if refTxn.Status() != transaction.StatusProcessed {
 			// Se a referência foi rejeitada ou falhou, rejeita a reversão
 			if refTxn.Status().IsTerminal() {
+				observability.WagerRetriesTotal.WithLabelValues("pending_ref", "rejected").Inc()
 				failCode := errs.CodeReferenceNotProcessable
 				if err := txn.MarkRejected(failCode); err != nil {
 					return err
@@ -209,6 +213,7 @@ func (uc *RetryPendingReferencesUseCase) processSinglePending(ctx context.Contex
 		}
 
 		// Sucesso: marca como PROCESSED e comita
+		observability.WagerRetriesTotal.WithLabelValues("pending_ref", "success").Inc()
 		if err := txn.MarkProcessed(w.Balance()); err != nil {
 			return err
 		}

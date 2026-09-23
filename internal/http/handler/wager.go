@@ -13,6 +13,7 @@ import (
 	"github.com/felipecristiano/desafio/internal/http/middleware"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"log/slog"
 )
 
 type WagerHandler struct {
@@ -120,6 +121,12 @@ func (h *WagerHandler) ProcessWager(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err != nil {
+		slog.Warn("http wager transaction failed",
+			"correlationId", corrID.String(),
+			"walletId", req.WalletID,
+			"providerId", req.ProviderID,
+			"error", err.Error(),
+		)
 		if errors.Is(err, errs.ErrPayloadConflict) {
 			writeJSON(w, http.StatusConflict, map[string]string{
 				"error":   "payload_conflict",
@@ -147,6 +154,15 @@ func (h *WagerHandler) ProcessWager(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	slog.Info("http wager transaction processed",
+		"correlationId", corrID.String(),
+		"transactionId", out.TransactionID.String(),
+		"walletId", req.WalletID,
+		"providerId", req.ProviderID,
+		"status", string(out.Status),
+		"idempotentReplay", out.IdempotentReplay,
+	)
 
 	statusHTTP := http.StatusOK
 	if out.Status == transaction.StatusPendingReference {

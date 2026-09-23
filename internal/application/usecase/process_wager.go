@@ -15,6 +15,7 @@ import (
 	"github.com/felipecristiano/desafio/internal/domain/outbox"
 	"github.com/felipecristiano/desafio/internal/domain/transaction"
 	"github.com/felipecristiano/desafio/internal/domain/wallet"
+	"github.com/felipecristiano/desafio/internal/infra/observability"
 	"github.com/google/uuid"
 )
 
@@ -73,7 +74,25 @@ func NewProcessWagerUseCase(
 	}
 }
 
-func (uc *ProcessWagerUseCase) Execute(ctx context.Context, input ProcessWagerInput) (*ProcessWagerOutput, error) {
+func (uc *ProcessWagerUseCase) Execute(ctx context.Context, input ProcessWagerInput) (output *ProcessWagerOutput, err error) {
+	start := time.Now()
+	defer func() {
+		dur := time.Since(start).Seconds()
+		if err != nil {
+			observability.WagerTransactionsTotal.WithLabelValues("FAILED", string(input.Kind), input.Source).Inc()
+			observability.WagerProcessingDurationSeconds.WithLabelValues(string(input.Kind), input.Source, "FAILED").Observe(dur)
+			if errors.Is(err, errs.ErrPayloadConflict) {
+				observability.WagerConcurrencyConflictsTotal.WithLabelValues("process_wager", "payload_conflict").Inc()
+			}
+		} else if output != nil {
+			observability.WagerTransactionsTotal.WithLabelValues(string(output.Status), string(input.Kind), input.Source).Inc()
+			observability.WagerProcessingDurationSeconds.WithLabelValues(string(input.Kind), input.Source, string(output.Status)).Observe(dur)
+			if output.IdempotentReplay {
+				observability.WagerDuplicatesTotal.WithLabelValues(input.Source, "idempotent_replay").Inc()
+			}
+		}
+	}()
+
 	if input.Kind == transaction.KindOpening {
 		return nil, errs.ErrOpeningForbidden
 	}
@@ -101,8 +120,6 @@ func (uc *ProcessWagerUseCase) Execute(ctx context.Context, input ProcessWagerIn
 		return nil, fmt.Errorf("process wager: calculate payload hash: %w", err)
 	}
 
-	var output *ProcessWagerOutput
-
 	err = uc.uow.WithTx(ctx, func(tx port.DBTX) error {
 		// 2. Se for SQS, registra na inbox para deduplicação no broker
 		if input.Source == "SQS" && input.MessageID != "" {
@@ -112,6 +129,7 @@ func (uc *ProcessWagerUseCase) Execute(ctx context.Context, input ProcessWagerIn
 				return err
 			}
 			if !inserted {
+				observability.WagerDuplicatesTotal.WithLabelValues("SQS", "inbox_duplicate").Inc()
 				// Reentrega via SQS: verifica se a transação de negócio já existe
 				existingTxn, err := uc.txnRepo.GetByIdempotencyKey(ctx, tx, input.IdempotencyKey)
 				if err == nil && existingTxn != nil {

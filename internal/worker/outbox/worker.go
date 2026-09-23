@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awssqs "github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/felipecristiano/desafio/internal/application/port"
+	"github.com/felipecristiano/desafio/internal/infra/observability"
 )
 
 // SQSProducerAPI define a interface do SDK SQS necessária para publicar eventos.
@@ -134,6 +135,8 @@ func (w *Worker) ProcessBatch(ctx context.Context) int {
 		for _, evt := range events {
 			// Se excedeu o número máximo de tentativas
 			if evt.Attempts() >= w.cfg.MaxAttempts {
+				observability.WagerRetriesTotal.WithLabelValues("outbox", "max_reached").Inc()
+				observability.WagerDLQMessagesTotal.WithLabelValues("max_retries_exceeded").Inc()
 				slog.Error("outbox event exceeded max attempts, skipping",
 					"eventId", evt.ID().String(),
 					"eventType", evt.EventType(),
@@ -152,8 +155,12 @@ func (w *Worker) ProcessBatch(ctx context.Context) int {
 			})
 
 			if sendErr != nil {
+				observability.WagerRetriesTotal.WithLabelValues("outbox", "failure").Inc()
+				observability.OutboxEventsPublishedTotal.WithLabelValues(evt.EventType(), "failure").Inc()
 				slog.Warn("failed to publish outbox event to sqs, recording failure with backoff",
 					"eventId", evt.ID().String(),
+					"eventType", evt.EventType(),
+					"attempts", evt.Attempts(),
 					"error", sendErr,
 				)
 				// Backoff exponencial simples: 2, 4, 8, 16... até max 60s
@@ -170,6 +177,21 @@ func (w *Worker) ProcessBatch(ctx context.Context) int {
 				slog.Error("failed to mark outbox event as published", "eventId", evt.ID().String(), "error", err)
 				return err
 			}
+
+			observability.OutboxPublishDelaySeconds.Observe(time.Since(evt.OccurredAt()).Seconds())
+			observability.OutboxEventsPublishedTotal.WithLabelValues(evt.EventType(), "success").Inc()
+
+			corrID := ""
+			if evt.CorrelationID() != nil {
+				corrID = evt.CorrelationID().String()
+			}
+			slog.Info("outbox event published",
+				"eventId", evt.ID().String(),
+				"eventType", evt.EventType(),
+				"correlationId", corrID,
+				"transactionId", evt.AggregateID().String(),
+				"attempts", evt.Attempts(),
+			)
 
 			publishedCount++
 		}

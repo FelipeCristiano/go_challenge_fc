@@ -67,7 +67,10 @@ func TestOutboxWorker_EndToEnd(t *testing.T) {
 	sqsClient := getSQSClient(t)
 	ctx := context.Background()
 
-	_, _ = pool.Exec(ctx, "TRUNCATE outbox_events, inbox_messages, wallet_ledger_entries, wager_transactions, wallets CASCADE")
+	_, execErr := pool.Exec(ctx, "DELETE FROM outbox_events")
+	if execErr != nil {
+		t.Fatalf("failed to clear outbox_events: %v", execErr)
+	}
 
 	uow := postgres.NewUnitOfWork(pool)
 	outboxRepo := postgres.NewOutboxRepository()

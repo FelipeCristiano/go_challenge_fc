@@ -6,6 +6,7 @@ import (
 
 	"github.com/felipecristiano/desafio/internal/application/port"
 	"github.com/felipecristiano/desafio/internal/domain/money"
+	"github.com/felipecristiano/desafio/internal/infra/observability"
 	"github.com/google/uuid"
 )
 
@@ -63,6 +64,12 @@ func (uc *ReconcileWalletUseCase) Execute(ctx context.Context, input ReconcileWa
 		}
 
 		consistent := diff.IsZero()
+		if consistent {
+			observability.ReconciliationChecksTotal.WithLabelValues("ok").Inc()
+		} else {
+			observability.ReconciliationChecksTotal.WithLabelValues("divergent").Inc()
+			observability.ReconciliationDivergencesTotal.WithLabelValues(string(w.Currency())).Inc()
+		}
 
 		output = &ReconcileWalletOutput{
 			WalletID:          w.ID(),

@@ -16,6 +16,7 @@ import (
 	"github.com/felipecristiano/desafio/internal/domain/errs"
 	"github.com/felipecristiano/desafio/internal/domain/money"
 	"github.com/felipecristiano/desafio/internal/domain/transaction"
+	"github.com/felipecristiano/desafio/internal/infra/observability"
 	"github.com/google/uuid"
 )
 
@@ -183,6 +184,7 @@ func (c *Consumer) handleMessage(ctx context.Context, msg sqstypes.Message) {
 
 	var envelope EnvelopeMessage
 	if err := json.Unmarshal([]byte(*msg.Body), &envelope); err != nil {
+		observability.WagerDLQMessagesTotal.WithLabelValues("poison_pill").Inc()
 		slog.Error("malformed message body in sqs, deleting poison pill",
 			"error", err,
 			"receiptHandle", *msg.ReceiptHandle,
@@ -193,6 +195,7 @@ func (c *Consumer) handleMessage(ctx context.Context, msg sqstypes.Message) {
 	}
 
 	if envelope.Type != "WagerTransactionRequested" {
+		observability.WagerDLQMessagesTotal.WithLabelValues("unknown_type").Inc()
 		slog.Warn("ignoring unknown sqs message type", "type", envelope.Type)
 		c.deleteMessage(ctx, msg)
 		return
@@ -202,21 +205,24 @@ func (c *Consumer) handleMessage(ctx context.Context, msg sqstypes.Message) {
 	data := envelope.Data
 	playerID, err := uuid.Parse(data.PlayerID)
 	if err != nil {
-		slog.Error("invalid playerId in sqs message", "playerId", data.PlayerID)
+		observability.WagerDLQMessagesTotal.WithLabelValues("poison_pill").Inc()
+		slog.Error("invalid playerId in sqs message", "playerId", data.PlayerID, "messageId", envelope.MessageID)
 		c.deleteMessage(ctx, msg)
 		return
 	}
 
 	walletID, err := uuid.Parse(data.WalletID)
 	if err != nil {
-		slog.Error("invalid walletId in sqs message", "walletId", data.WalletID)
+		observability.WagerDLQMessagesTotal.WithLabelValues("poison_pill").Inc()
+		slog.Error("invalid walletId in sqs message", "walletId", data.WalletID, "messageId", envelope.MessageID)
 		c.deleteMessage(ctx, msg)
 		return
 	}
 
 	m, err := money.NewFromExternalString(data.Money.Amount, money.Currency(data.Money.Currency))
 	if err != nil {
-		slog.Error("invalid money in sqs message", "amount", data.Money.Amount, "currency", data.Money.Currency)
+		observability.WagerDLQMessagesTotal.WithLabelValues("poison_pill").Inc()
+		slog.Error("invalid money in sqs message", "amount", data.Money.Amount, "currency", data.Money.Currency, "messageId", envelope.MessageID)
 		c.deleteMessage(ctx, msg)
 		return
 	}
@@ -228,10 +234,12 @@ func (c *Consumer) handleMessage(ctx context.Context, msg sqstypes.Message) {
 
 	corrID := uuid.New()
 	slog.Info("processing sqs wager transaction",
+		"correlationId", corrID.String(),
 		"messageId", envelope.MessageID,
+		"walletId", walletID.String(),
+		"providerId", data.ProviderID,
 		"idempotencyKey", idempotencyKey,
 		"kind", data.Kind,
-		"walletId", walletID.String(),
 	)
 
 	// Executa caso de uso compartilhado
@@ -258,18 +266,26 @@ func (c *Consumer) handleMessage(ctx context.Context, msg sqstypes.Message) {
 			errors.Is(err, errs.ErrOpeningForbidden) ||
 			errors.Is(err, errs.ErrWalletNotFound) ||
 			errors.Is(err, errs.ErrInvalidInput) {
+			observability.WagerDLQMessagesTotal.WithLabelValues("terminal_domain_error").Inc()
 			slog.Error("terminal domain error in sqs message, removing from queue",
-				"error", err,
+				"correlationId", corrID.String(),
 				"messageId", envelope.MessageID,
+				"walletId", walletID.String(),
+				"providerId", data.ProviderID,
+				"error", err.Error(),
 			)
 			c.deleteMessage(ctx, msg)
 			return
 		}
 
 		// Falhas transitórias (ex.: timeout de conexão com banco de dados)
+		observability.WagerRetriesTotal.WithLabelValues("sqs", "failure").Inc()
 		slog.Warn("transient error processing sqs message, releasing visibility for retry",
-			"error", err,
+			"correlationId", corrID.String(),
 			"messageId", envelope.MessageID,
+			"walletId", walletID.String(),
+			"providerId", data.ProviderID,
+			"error", err.Error(),
 		)
 		c.releaseVisibility(ctx, msg)
 		return
@@ -277,8 +293,12 @@ func (c *Consumer) handleMessage(ctx context.Context, msg sqstypes.Message) {
 
 	// Transações concluídas (PROCESSED, REJECTED ou PENDING_REFERENCE) foram persistidas duravelmente
 	slog.Info("sqs wager transaction processed successfully",
+		"correlationId", corrID.String(),
 		"messageId", envelope.MessageID,
-		"status", out.Status,
+		"transactionId", out.TransactionID.String(),
+		"walletId", walletID.String(),
+		"providerId", data.ProviderID,
+		"status", string(out.Status),
 		"idempotentReplay", out.IdempotentReplay,
 	)
 
