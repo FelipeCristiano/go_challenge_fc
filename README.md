@@ -1,171 +1,155 @@
 # Desafio Backend — Processamento Distribuído de Apostas em Go
 
-## Pré-requisitos
+Backend resiliente para processamento distribuído de apostas esportivas e jogos de cassino em Go, projetado para operar sob alta concorrência com garantias estritas de integridade financeira, idempotência durável, deduplicação em mensageria FIFO, transações ACID e observabilidade completa.
 
-- Go 1.27+
-- Docker e Docker Compose v2+
-- `awslocal` (opcional, para inspeção manual das filas)
+---
 
-## Variáveis de Ambiente
+## 1. Pré-requisitos
 
-Copie o arquivo de exemplo e ajuste se necessário:
+- **Go**: 1.27+
+- **Docker e Docker Compose**: v2+
+- **Sistema Operacional**: Linux, macOS ou Windows (PowerShell)
+- **AWS CLI / awslocal** *(opcional)*: para inspeção manual de filas SQS
+
+---
+
+## 2. Variáveis de Ambiente
+
+Copie o arquivo de exemplo para criar o `.env` local:
 
 ```sh
 cp .env.example .env
 ```
 
-As variáveis estão documentadas no `.env.example`. Para o ambiente local com Docker Compose, os valores padrão já funcionam sem alteração.
+Para o ambiente de desenvolvimento local usando Docker Compose, os valores padrão de `.env.example` já estão pré-configurados e prontos para uso:
 
-## Inicialização
+| Variável | Descrição | Padrão Local |
+| :--- | :--- | :--- |
+| `HTTP_PORT` | Porta do servidor HTTP | `3000` |
+| `DATABASE_URL` | String de conexão PostgreSQL | `postgres://desafio:desafio@localhost:5432/desafio?sslmode=disable` |
+| `KEYCLOAK_URL` | URL base do Keycloak IdP | `http://localhost:8080` |
+| `KEYCLOAK_REALM` | Nome do Realm configurado | `desafio` |
+| `AWS_ENDPOINT` | Endpoint LocalStack (SQS) | `http://localhost:4566` |
+| `AWS_REGION` | Região AWS | `us-east-1` |
+| `SQS_QUEUE_URL` | Fila SQS FIFO de transações | `http://localhost:4566/000000000000/wager-transactions.fifo` |
+| `SQS_EVENTS_QUEUE_URL` | Fila SQS FIFO de eventos (Outbox) | `http://localhost:4566/000000000000/wager-events.fifo` |
+| `PENDING_REF_MAX_RETRIES`| Máximo de retentativas para referências pendentes | `5` |
+| `SHUTDOWN_TIMEOUT` | Timeout para encerramento gracioso | `30s` |
 
-### 1. Subir infraestrutura
+---
+
+## 3. Inicialização dos Serviços
+
+### 3.1. Subir Infraestrutura (PostgreSQL, LocalStack, Keycloak)
 
 ```sh
 docker compose up -d postgres keycloak localstack
 ```
 
-> Aguarde o Keycloak ficar disponível (~60s na primeira execução) antes de continuar.
+> **Provisionamento Automático:**
+> - **PostgreSQL**: O script [`scripts/postgres/init.sql`](file:///C:/Users/fcristiano/Documents/Projetos/go/desafio/scripts/postgres/init.sql) cria automaticamente a base `keycloak` na inicialização.
+> - **LocalStack SQS FIFO**: O script [`scripts/localstack/init-sqs.sh`](file:///C:/Users/fcristiano/Documents/Projetos/go/desafio/scripts/localstack/init-sqs.sh) provisiona as filas `wager-transactions.fifo`, `wager-transactions-dlq.fifo` e `wager-events.fifo` com deduplicação por conteúdo.
+> - **Keycloak IdP**: O realm [`scripts/keycloak/desafio-realm.json`](file:///C:/Users/fcristiano/Documents/Projetos/go/desafio/scripts/keycloak/desafio-realm.json) é importado automaticamente no primeiro boot com os clientes e papéis pré-configurados.
 
-### 2. Aplicar migrations
+Aguarde o Keycloak concluir o bootstrap inicial (~45-60 segundos):
+
+```sh
+# Verificar status dos serviços
+docker compose ps
+```
+
+### 3.2. Aplicar Migrations no Banco de Dados
 
 ```sh
 docker compose run --rm migrate
 ```
 
-Para reverter:
+Para reverter migrations (*rollback*):
 
 ```sh
 docker compose run --rm migrate down 1
 ```
 
-### 3. Executar a aplicação (desenvolvimento)
+### 3.3. Executar a Aplicação Localmente
 
 ```sh
-cp .env.example .env
 go run ./cmd/server
 ```
 
-### 4. Executar via Docker Compose (produção local)
+### 3.4. Executar via Docker Compose (Stack Completa)
 
 ```sh
 docker compose --profile app up --build
 ```
 
-## Testes
+---
 
-Os testes são organizados entre testes unitários (puros, sem I/O ou dependências externas) e testes de integração (exercitando PostgreSQL real via Docker Compose).
+## 4. Identidades de Teste do IdP (Keycloak)
 
-### 1. Testes Unitários de Domínio (rápidos, sem containers)
+O Realm `desafio` já vem provisionado com 3 clientes via `client_credentials`:
 
-Cobrem parsing monetário sem floats, regras de negócio dos 5 tipos de aposta, cálculo de hash canônico e invariantes aritméticas do ledger:
+| Client ID | Client Secret | Papéis (Roles) | Finalidade |
+| :--- | :--- | :--- | :--- |
+| `internal-admin` | `internal-secret` | `internal` | Abertura de carteiras (`POST /wallets`) e reconciliação financeira (`POST /wallets/:id/reconciliation`) |
+| `provider-a` | `provider-a-secret` | `provider` | Envio de apostas e consultas do provedor A (`POST /wagering/transactions`) |
+| `provider-b` | `provider-b-secret` | `provider` | Envio de apostas e consultas do provedor B (utilizado para provar isolamento de tenants) |
 
+---
+
+## 5. Exemplos de Chamadas Autenticadas
+
+### 5.1. Obter Tokens JWT no Keycloak
+
+**Token Administrativo (`internal-admin`):**
 ```sh
-# Executar todos os testes unitários
-go test -v ./internal/domain/...
-
-# Executar testes unitários específicos
-go test -v ./internal/domain/money/...
-go test -v ./internal/domain/wallet/...
-go test -v ./internal/domain/transaction/...
-go test -v ./internal/domain/ledger/...
+INTERNAL_TOKEN=$(curl -s -X POST http://localhost:8080/realms/desafio/protocol/openid-connect/token \
+  -d "grant_type=client_credentials" \
+  -d "client_id=internal-admin" \
+  -d "client_secret=internal-secret" | jq -r .access_token)
 ```
 
-### 2. Análise Estática (Vet)
-
+**Token de Provedor (`provider-a`):**
 ```sh
-go vet ./...
-```
-
-### 3. Teste com Detector de Condições de Corrida (`-race`)
-
-> **Nota**: O detector de condições de corrida (`-race`) exige CGO habilitado e um compilador C (`gcc`). Em ambientes Linux / macOS / CI ou Windows com MinGW configurado:
-
-```sh
-# No PowerShell (Windows com MinGW / 64-bit):
-$env:GOARCH="amd64"
-go test -race ./internal/domain/...
-
-# No Linux / macOS / Bash:
-GOARCH=amd64 go test -race ./internal/domain/...
-```
-
-### 4. Testes de Integração (com Containers Reais)
-
-Exercitam a camada de persistência com `pgx/v5` e os casos de uso ponta a ponta (concorrência de 2 apostas de 80.00 sobre saldo de 100.00, idempotência, reversões antecipadas e reconciliação):
-
-```sh
-# 1. Certifique-se de que o PostgreSQL está rodando e migrado
-docker compose up -d postgres
-docker compose run --rm migrate
-
-# 2. Executar todos os testes de integração
-# No PowerShell:
-$env:GOARCH="amd64"
-go test -v -tags=integration ./...
-
-# No Linux / Bash:
-GOARCH=amd64 go test -v -tags=integration ./...
-
-# Executar testes unitários de métricas e observabilidade:
-go test -v ./internal/infra/observability/...
-
-# Executar apenas testes de integração dos casos de uso:
-go test -v -tags=integration ./internal/application/usecase/...
-
-# Executar apenas testes de integração dos repositórios pgx:
-go test -v -tags=integration ./internal/infra/db/postgres/...
-
-# Executar testes de integração da API HTTP e roteamento:
-go test -v -tags=integration ./internal/http/...
-
-# Executar testes de integração do Consumidor SQS FIFO:
-go test -v -tags=integration ./internal/worker/sqs/...
-
-# Executar testes de integração do Outbox Worker:
-go test -v -tags=integration ./internal/worker/outbox/...
-
-# Executar teste de composição Uber Fx e ciclo de vida:
-go test -v -tags=integration ./cmd/server/...
-```
-
-### 5. Cenário de Execução com Múltiplas Instâncias
-
-```sh
-HTTP_PORT=3001 go run ./cmd/server &
-HTTP_PORT=3002 go run ./cmd/server &
-HTTP_PORT=3003 go run ./cmd/server &
-```
-
-## Exemplos de Chamadas
-
-### Obter token (provider-a)
-
-```sh
-curl -s -X POST http://localhost:8080/realms/desafio/protocol/openid-connect/token \
+PROVIDER_A_TOKEN=$(curl -s -X POST http://localhost:8080/realms/desafio/protocol/openid-connect/token \
   -d "grant_type=client_credentials" \
   -d "client_id=provider-a" \
-  -d "client_secret=provider-a-secret" | jq .access_token
+  -d "client_secret=provider-a-secret" | jq -r .access_token)
 ```
 
-### Abrir carteira
+---
+
+### 5.2. Abertura de Carteira (`POST /wallets`)
+
+Requer papel `internal`. Cria a carteira e, se o saldo inicial for positivo, gera a transação `OPENING` interna e o lançamento inicial no ledger:
 
 ```sh
 curl -s -X POST http://localhost:3000/wallets \
-  -H "Authorization: Bearer <TOKEN>" \
+  -H "Authorization: Bearer $INTERNAL_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"playerId":"0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1","initialBalance":{"amount":"1000.00","currency":"BRL"}}' | jq
+  -d '{
+    "playerId": "0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1",
+    "initialBalance": {
+      "amount": "1000.00",
+      "currency": "BRL"
+    }
+  }' | jq
 ```
 
-### Enviar aposta
+---
 
+### 5.3. Envio de Apostas e Operações de Jogos (`POST /wagering/transactions`)
+
+Requer papel `provider` e cabeçalho `Idempotency-Key: <providerId>:<externalTransactionId>`.
+
+#### 1. Aposta (`BET` — Débito):
 ```sh
 curl -s -X POST http://localhost:3000/wagering/transactions \
-  -H "Authorization: Bearer <TOKEN>" \
+  -H "Authorization: Bearer $PROVIDER_A_TOKEN" \
   -H "Content-Type: application/json" \
-  -H "Idempotency-Key: provider-a:transaction-123" \
+  -H "Idempotency-Key: provider-a:tx-bet-101" \
   -d '{
     "providerId": "provider-a",
-    "externalTransactionId": "transaction-123",
+    "externalTransactionId": "tx-bet-101",
     "playerId": "0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1",
     "walletId": "<WALLET_ID>",
     "roundId": "round-987",
@@ -175,56 +159,254 @@ curl -s -X POST http://localhost:3000/wagering/transactions \
   }' | jq
 ```
 
-### Health checks e Métricas
- 
+#### 2. Prêmio (`WIN` — Crédito):
 ```sh
-# Health checks
+curl -s -X POST http://localhost:3000/wagering/transactions \
+  -H "Authorization: Bearer $PROVIDER_A_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: provider-a:tx-win-102" \
+  -d '{
+    "providerId": "provider-a",
+    "externalTransactionId": "tx-win-102",
+    "playerId": "0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1",
+    "walletId": "<WALLET_ID>",
+    "roundId": "round-987",
+    "gameId": "fortune-chimp",
+    "kind": "WIN",
+    "money": {"amount": "75.00", "currency": "BRL"}
+  }' | jq
+```
+
+#### 3. Derrota Sem Efeito Financeiro (`LOSS`):
+```sh
+curl -s -X POST http://localhost:3000/wagering/transactions \
+  -H "Authorization: Bearer $PROVIDER_A_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: provider-a:tx-loss-103" \
+  -d '{
+    "providerId": "provider-a",
+    "externalTransactionId": "tx-loss-103",
+    "playerId": "0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1",
+    "walletId": "<WALLET_ID>",
+    "roundId": "round-988",
+    "gameId": "fortune-chimp",
+    "kind": "LOSS",
+    "money": {"amount": "0.00", "currency": "BRL"}
+  }' | jq
+```
+
+#### 4. Reembolso de Aposta (`REFUND` — Crédito de devolução):
+```sh
+curl -s -X POST http://localhost:3000/wagering/transactions \
+  -H "Authorization: Bearer $PROVIDER_A_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: provider-a:tx-refund-104" \
+  -d '{
+    "providerId": "provider-a",
+    "externalTransactionId": "tx-refund-104",
+    "referenceExternalTransactionId": "tx-bet-101",
+    "playerId": "0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1",
+    "walletId": "<WALLET_ID>",
+    "roundId": "round-987",
+    "gameId": "fortune-chimp",
+    "kind": "REFUND",
+    "money": {"amount": "25.00", "currency": "BRL"}
+  }' | jq
+```
+
+#### 5. Estorno de Operação (`ROLLBACK`):
+```sh
+curl -s -X POST http://localhost:3000/wagering/transactions \
+  -H "Authorization: Bearer $PROVIDER_A_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: provider-a:tx-rollback-105" \
+  -d '{
+    "providerId": "provider-a",
+    "externalTransactionId": "tx-rollback-105",
+    "referenceExternalTransactionId": "tx-bet-101",
+    "playerId": "0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1",
+    "walletId": "<WALLET_ID>",
+    "roundId": "round-987",
+    "gameId": "fortune-chimp",
+    "kind": "ROLLBACK",
+    "money": {"amount": "25.00", "currency": "BRL"}
+  }' | jq
+```
+
+---
+
+### 5.4. Consultas e Auditoria
+
+#### Consulta de Saldo e Versão da Carteira (`GET /wallets/:walletId`):
+```sh
+curl -s http://localhost:3000/wallets/<WALLET_ID> \
+  -H "Authorization: Bearer $PROVIDER_A_TOKEN" | jq
+```
+
+#### Extrato Auditável do Ledger (`GET /wallets/:walletId/ledger`):
+```sh
+curl -s "http://localhost:3000/wallets/<WALLET_ID>/ledger?limit=20" \
+  -H "Authorization: Bearer $PROVIDER_A_TOKEN" | jq
+```
+
+#### Reconciliação Financeira (`POST /wallets/:walletId/reconciliation`):
+Audita matematicamente o saldo gravado contra a somatória dos lançamentos do ledger append-only (`saldo = soma(créditos) - soma(débitos)`):
+```sh
+curl -s -X POST http://localhost:3000/wallets/<WALLET_ID>/reconciliation \
+  -H "Authorization: Bearer $INTERNAL_TOKEN" | jq
+```
+
+#### Prova de Isolamento de Tenants (`403 Forbidden`):
+Se `provider-a` tentar consultar uma transação de `provider-b`:
+```sh
+curl -s -i http://localhost:3000/providers/provider-b/wagering/transactions/tx-999 \
+  -H "Authorization: Bearer $PROVIDER_A_TOKEN"
+# Retorna: HTTP/1.1 403 Forbidden — token providerId does not match resource providerId
+```
+
+---
+
+### 5.5. Health Checks e Métricas Prometheus
+
+```sh
+# Liveness (saúde do processo)
 curl http://localhost:3000/health/live
+
+# Readiness (conectividade com o PostgreSQL)
 curl http://localhost:3000/health/ready
 
-# Métricas Prometheus
+# Métricas no formato Prometheus
 curl http://localhost:3000/metrics
 ```
 
-## Estrutura do Projeto
+---
+
+## 6. Comandos de Teste
+
+Conforme exigido na Seção 15 do desafio, os comandos padronizados estão disponíveis abaixo:
+
+### 6.1. Comandos Principais
+
+```sh
+# 1. Subir infraestrutura completa e aplicação
+docker compose up --build
+
+# 2. Executar testes unitários (rápidos, sem I/O ou containers)
+go test ./...
+
+# 3. Análise estática com o compilador Go (zero warnings)
+go vet ./...
+
+# 4. Detector de condições de corrida (requer ambiente Linux/CGO habilitado)
+go test -race ./internal/domain/...
+```
+
+> **Nota sobre `-race` no Windows**: O detector de *race conditions* do Go (`-race`) depende de CGO e de um compilador C (`gcc`). Em ambientes Windows sem MinGW configurado, o comando pode ser executado dentro do container Docker ou no pipeline CI Linux.
+
+---
+
+### 6.2. Testes de Integração com Containers Reais (`-tags=integration`)
+
+Os testes de integração utilizam a build tag `integration` para exercitar a persistência real no PostgreSQL, mensageria SQS no LocalStack e autenticação com Keycloak:
+
+```sh
+# No PowerShell (Windows 64-bit):
+$env:GOARCH="amd64"
+go test -v -tags=integration ./...
+
+# No Linux / macOS / Bash:
+GOARCH=amd64 go test -v -tags=integration ./...
+```
+
+---
+
+### 6.3. Suíte de Concorrência, Caos e Idempotência (Seção 13 do DESAFIO.md)
+
+O arquivo [`tests/concurrency_test.go`](file:///C:/Users/fcristiano/Documents/Projetos/go/desafio/tests/concurrency_test.go) executa testes rigorosos contra infraestrutura real:
+
+```sh
+# Executar apenas a suíte de concorrência e caos:
+go test -v -tags=integration ./tests/...
+```
+
+Os 8 cenários obrigatórios cobertos e aprovados são:
+
+1. **50 Apostas Simultâneas da Mesma Operação (`TestConcurrency_50SameBet_SingleDebit`)**:
+   50 goroutines submetem em paralelo a mesma aposta. Apenas 1 débito é aplicado na carteira e gravado no ledger; as outras 49 recebem replay idempotente legítimo com o mesmo saldo (`idempotentReplay: true`) e divergência zero na reconciliação.
+2. **Disputa de 2 Apostas de 80.00 sobre Saldo de 100.00 (`TestConcurrency_Two80BetsOn100Balance`)**:
+   Duas apostas simultâneas disputam o saldo via lock pessimista (`SELECT FOR UPDATE`). Exatamente uma é aceita (`PROCESSED`) e a outra é rejeitada por saldo insuficiente (`REJECTED`), com saldo final de exatamente 20.00 BRL.
+3. **Alto Paralelismo em Carteiras Distintas (`TestConcurrency_DistinctWallets_HighParallelism`)**:
+   10 carteiras processam débitos em paralelo sem contenção cruzada e com reconciliação 100% íntegra.
+4. **Múltiplas Instâncias HTTP Independentes (`TestConcurrency_MultiInstance_Distributed`)**:
+   3 servidores HTTP reais compartilhando o mesmo PostgreSQL processam 30 apostas simultâneas até zerar o saldo com concorrência perfeita e sem atualizações perdidas (*lost updates*).
+5. **Simulação de Chaos na Reentrega SQS (`TestChaos_SQSConsumer_RedeliveryDeduplication`)**:
+   Simula queda do consumidor após o commit no banco e antes da remoção da mensagem no SQS (`DeleteMessage`). A reentrega da mensagem para outro worker é deduplicada via Inbox persistente com zero débitos duplicados.
+6. **Publishers Concorrentes da Outbox com SKIP LOCKED (`TestConcurrency_DualOutboxPublishers`)**:
+   2 workers disputam simultaneamente o lote de eventos pendentes. Todos os eventos são publicados sem duplicação nem contenção.
+7. **Reversões Desordenadas (`TestChaos_PendingReference_ResolutionAndExpiration`)**:
+   `REFUND` submetido antes da aposta original entra em `PENDING_REFERENCE`. Ao chegar a aposta original, o worker de retentativas resolve a pendência e restaura o saldo; reversões órfãs são rejeitadas após o limite de tentativas com `REFERENCE_NOT_FOUND`.
+8. **Deduplicação Cruzada entre HTTP e SQS (`TestConcurrency_CrossHTTPAndSQS_Deduplication`)**:
+   Chamada simultânea da mesma transação via API REST e via fila SQS. Uma atua como processamento original e a outra como replay idempotente imediato.
+
+---
+
+### 6.4. Execução com Múltiplas Instâncias HTTP em Portas Diferentes
+
+```sh
+# Instância 1
+HTTP_PORT=3001 go run ./cmd/server &
+
+# Instância 2
+HTTP_PORT=3002 go run ./cmd/server &
+
+# Instância 3
+HTTP_PORT=3003 go run ./cmd/server &
+```
+
+---
+
+## 7. Estrutura do Projeto
 
 ```
 desafio/
-├── cmd/server/          # Entrypoint da aplicação e composição Fx
+├── cmd/
+│   └── server/              # Entrypoint da aplicação e composição Fx (DI e Lifecycle)
 ├── internal/
-│   ├── domain/          # Domínio puro (sem dependências externas)
-│   │   ├── money/       # Value object Money (int64 centavos)
-│   │   ├── wallet/      # Agregado Wallet
-│   │   ├── transaction/ # WagerTransaction + máquina de estados
-│   │   ├── ledger/      # WalletLedgerEntry (imutável)
-│   │   ├── events/      # Eventos de domínio
-│   │   ├── inbox/       # Modelo InboxMessage
-│   │   └── outbox/      # Modelo OutboxEvent
+│   ├── domain/              # Domínio puro (sem dependências externas)
+│   │   ├── money/           # Value object Money (int64 centavos, zero floats)
+│   │   ├── wallet/          # Agregado Wallet (invariantes e versionamento)
+│   │   ├── transaction/     # WagerTransaction + máquina de estados finita
+│   │   ├── ledger/          # WalletLedgerEntry (imutável, append-only)
+│   │   ├── events/          # Eventos de domínio versionados
+│   │   ├── inbox/           # Modelo InboxMessage (deduplicação de broker)
+│   │   └── outbox/          # Modelo OutboxEvent (Transactional Outbox)
 │   ├── application/
-│   │   ├── port/        # Interfaces de repositórios e Unit of Work
-│   │   └── usecase/     # Casos de uso e regras de negócio
+│   │   ├── port/            # Interfaces de repositórios e Unit of Work (DBTX)
+│   │   └── usecase/         # Casos de uso e regras de negócio
 │   ├── infra/
-│   │   ├── auth/        # Validação JWT Keycloak (JWKS)
-│   │   ├── config/      # Leitura e validação de env vars
+│   │   ├── auth/            # Validação JWT Keycloak com cache JWKS
+│   │   ├── config/          # Leitura e validação estrita de variáveis de ambiente
 │   │   ├── db/
-│   │   │   ├── migrations/  # Migrations SQL versionadas
-│   │   │   └── postgres/    # Pool pgx + repositórios PostgreSQL
-│   │   └── observability/   # Métricas Prometheus e logger JSON
+│   │   │   ├── migrations/  # Migrations SQL versionadas (golang-migrate)
+│   │   │   └── postgres/    # Pool pgx/v5 + repositórios PostgreSQL
+│   │   └── observability/   # 10 Métricas Prometheus e logger JSON (log/slog)
 │   ├── http/
-│   │   ├── handler/     # HTTP handlers
-│   │   └── middleware/  # Auth, logging, correlation, recovery
+│   │   ├── handler/         # HTTP handlers REST
+│   │   └── middleware/      # Auth, tenant isolation, logging, recovery
 │   └── worker/
-│       ├── outbox/      # Worker de publicação da outbox (SKIP LOCKED)
-│       ├── pendingref/  # Worker de resolução de referências pendentes
-│       └── sqs/         # Consumidor SQS FIFO com deduplicação Inbox
+│       ├── outbox/          # Worker de publicação da outbox (FOR UPDATE SKIP LOCKED)
+│       ├── pendingref/      # Worker de resolução de referências pendentes
+│       └── sqs/             # Consumidor SQS FIFO com deduplicação Inbox
+├── tests/                   # Suíte de testes de concorrência, idempotência e caos (Seção 13)
 ├── scripts/
-│   ├── keycloak/        # Realm export para auto-import
-│   └── localstack/      # Script de provisionamento SQS FIFO
-├── docker-compose.yml
-├── Dockerfile
-├── .env.example
-├── ARCHITECTURE.md
-└── README.md
+│   ├── keycloak/            # Realm export para importação automática do Keycloak
+│   ├── localstack/          # Script bash de provisionamento das filas SQS FIFO
+│   └── postgres/            # Script de inicialização do banco keycloak
+├── docker-compose.yml       # Orquestração local dos containers
+├── Dockerfile               # Build multi-stage da aplicação Go
+├── .env.example             # Variáveis de ambiente de exemplo
+├── ARCHITECTURE.md          # Registro detalhado das decisões de arquitetura
+└── README.md                # Guia de início rápido e comandos
 ```
 
-Consulte `ARCHITECTURE.md` para decisões técnicas detalhadas.
+Para detalhes aprofundados sobre decisões de design, modelos matemáticos e garantias de consistência, consulte o [`ARCHITECTURE.md`](file:///C:/Users/fcristiano/Documents/Projetos/go/desafio/ARCHITECTURE.md).

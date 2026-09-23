@@ -22,7 +22,7 @@ type TokenValidator interface {
 
 type Claims struct {
 	jwt.RegisteredClaims
-	ClientID    string   `json:"azp"`
+	ClientID    string `json:"azp"`
 	RealmAccess struct {
 		Roles []string `json:"roles"`
 	} `json:"realm_access"`

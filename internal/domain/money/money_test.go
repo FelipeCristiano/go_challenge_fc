@@ -113,7 +113,6 @@ func TestNewFromInt64_Negative(t *testing.T) {
 	}
 }
 
-
 func TestZero(t *testing.T) {
 	m := money.Zero(money.BRL)
 	if !m.IsZero() {
@@ -123,7 +122,6 @@ func TestZero(t *testing.T) {
 		t.Errorf("got %s, want 0.00", m.String())
 	}
 }
-
 
 func TestString(t *testing.T) {
 	cases := []struct {
@@ -148,7 +146,6 @@ func TestString(t *testing.T) {
 		})
 	}
 }
-
 
 func TestAdd_Success(t *testing.T) {
 	a := money.NewFromInt64(1000, money.BRL) // 10.00
@@ -179,7 +176,6 @@ func TestAdd_Overflow(t *testing.T) {
 		t.Error("expected overflow error")
 	}
 }
-
 
 func TestSub_Success(t *testing.T) {
 	a := money.NewFromInt64(1000, money.BRL)
@@ -236,7 +232,6 @@ func TestNeg_MinInt64Overflow(t *testing.T) {
 	}
 }
 
-
 func TestComparisons(t *testing.T) {
 	a := money.NewFromInt64(1000, money.BRL)
 	b := money.NewFromInt64(500, money.BRL)
@@ -275,7 +270,6 @@ func TestComparisons_CurrencyMismatch(t *testing.T) {
 		t.Error("expected currency mismatch in LessThan")
 	}
 }
-
 
 func TestPredicates(t *testing.T) {
 	zero := money.Zero(money.BRL)

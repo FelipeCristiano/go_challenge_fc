@@ -90,15 +90,15 @@ func (r *LedgerRepository) GetByWalletID(ctx context.Context, tx port.DBTX, wall
 	var entries []*ledger.WalletLedgerEntry
 	for rows.Next() {
 		var (
-			id             uuid.UUID
-			wID            uuid.UUID
-			txnID          uuid.UUID
-			dirStr         string
-			amount         int64
-			currencyStr    string
-			balanceBefore  int64
-			balanceAfter   int64
-			createdAt      time.Time
+			id            uuid.UUID
+			wID           uuid.UUID
+			txnID         uuid.UUID
+			dirStr        string
+			amount        int64
+			currencyStr   string
+			balanceBefore int64
+			balanceAfter  int64
+			createdAt     time.Time
 		)
 
 		err := rows.Scan(

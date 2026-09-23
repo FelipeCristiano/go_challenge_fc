@@ -49,22 +49,22 @@ func (s Status) IsTerminal() bool {
 }
 
 type WagerTransaction struct {
-	id       uuid.UUID
-	walletID uuid.UUID
-	playerID uuid.UUID
-	providerID             *string
-	externalTransactionID  *string
-	idempotencyKey         *string
-	payloadHash            *string
-	roundID                *string
-	gameID                 *string
+	id                    uuid.UUID
+	walletID              uuid.UUID
+	playerID              uuid.UUID
+	providerID            *string
+	externalTransactionID *string
+	idempotencyKey        *string
+	payloadHash           *string
+	roundID               *string
+	gameID                *string
 
 	kind   Kind
 	status Status
 	money  money.Money
 
 	referenceExternalTransactionID *string
-	referenceTransactionID         *uuid.UUID 
+	referenceTransactionID         *uuid.UUID
 
 	resultBalance *money.Money
 
@@ -78,7 +78,6 @@ type WagerTransaction struct {
 	createdAt time.Time
 	updatedAt time.Time
 }
-
 
 func NewExternal(
 	id uuid.UUID,
@@ -288,31 +287,31 @@ func (t *WagerTransaction) ResolveReference(refID uuid.UUID) {
 	t.referenceTransactionID = &refID
 }
 
-
-func (t *WagerTransaction) ID() uuid.UUID      { return t.id }
-func (t *WagerTransaction) WalletID() uuid.UUID { return t.walletID }
-func (t *WagerTransaction) PlayerID() uuid.UUID { return t.playerID }
-func (t *WagerTransaction) Kind() Kind          { return t.kind }
-func (t *WagerTransaction) Status() Status      { return t.status }
-func (t *WagerTransaction) Money() money.Money  { return t.money }
+func (t *WagerTransaction) ID() uuid.UUID        { return t.id }
+func (t *WagerTransaction) WalletID() uuid.UUID  { return t.walletID }
+func (t *WagerTransaction) PlayerID() uuid.UUID  { return t.playerID }
+func (t *WagerTransaction) Kind() Kind           { return t.kind }
+func (t *WagerTransaction) Status() Status       { return t.status }
+func (t *WagerTransaction) Money() money.Money   { return t.money }
 func (t *WagerTransaction) CreatedAt() time.Time { return t.createdAt }
 func (t *WagerTransaction) UpdatedAt() time.Time { return t.updatedAt }
-func (t *WagerTransaction) RetryCount() int     { return t.retryCount }
-func (t *WagerTransaction) IsTerminal() bool    { return t.status.IsTerminal() }
+func (t *WagerTransaction) RetryCount() int      { return t.retryCount }
+func (t *WagerTransaction) IsTerminal() bool     { return t.status.IsTerminal() }
 
-func (t *WagerTransaction) ProviderID() *string             { return t.providerID }
-func (t *WagerTransaction) ExternalTransactionID() *string  { return t.externalTransactionID }
-func (t *WagerTransaction) IdempotencyKey() *string         { return t.idempotencyKey }
-func (t *WagerTransaction) PayloadHash() *string            { return t.payloadHash }
-func (t *WagerTransaction) RoundID() *string                { return t.roundID }
-func (t *WagerTransaction) GameID() *string                 { return t.gameID }
-func (t *WagerTransaction) ReferenceExternalTransactionID() *string { return t.referenceExternalTransactionID }
-func (t *WagerTransaction) ReferenceTransactionID() *uuid.UUID      { return t.referenceTransactionID }
-func (t *WagerTransaction) ResultBalance() *money.Money              { return t.resultBalance }
-func (t *WagerTransaction) FailureCode() *string                     { return t.failureCode }
-func (t *WagerTransaction) RetryAfter() *time.Time                   { return t.retryAfter }
-func (t *WagerTransaction) CorrelationID() *uuid.UUID                { return t.correlationID }
-
+func (t *WagerTransaction) ProviderID() *string            { return t.providerID }
+func (t *WagerTransaction) ExternalTransactionID() *string { return t.externalTransactionID }
+func (t *WagerTransaction) IdempotencyKey() *string        { return t.idempotencyKey }
+func (t *WagerTransaction) PayloadHash() *string           { return t.payloadHash }
+func (t *WagerTransaction) RoundID() *string               { return t.roundID }
+func (t *WagerTransaction) GameID() *string                { return t.gameID }
+func (t *WagerTransaction) ReferenceExternalTransactionID() *string {
+	return t.referenceExternalTransactionID
+}
+func (t *WagerTransaction) ReferenceTransactionID() *uuid.UUID { return t.referenceTransactionID }
+func (t *WagerTransaction) ResultBalance() *money.Money        { return t.resultBalance }
+func (t *WagerTransaction) FailureCode() *string               { return t.failureCode }
+func (t *WagerTransaction) RetryAfter() *time.Time             { return t.retryAfter }
+func (t *WagerTransaction) CorrelationID() *uuid.UUID          { return t.correlationID }
 
 func validateExternalMoney(kind Kind, m money.Money) error {
 	switch kind {

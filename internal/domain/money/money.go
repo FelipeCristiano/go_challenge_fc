@@ -132,7 +132,6 @@ func (m Money) String() string {
 	return fmt.Sprintf("%s%d.%02d", sign, intPart, decPart)
 }
 
-
 func validateCurrency(c Currency) error {
 	if !validCurrencies[c] {
 		return fmt.Errorf("money: unsupported currency %q", c)

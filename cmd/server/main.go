@@ -101,20 +101,20 @@ func provideDBTX(pool *pgxpool.Pool) port.DBTX {
 type Repositories struct {
 	fx.Out
 
-	WalletRepo  port.WalletRepository
-	TxnRepo     port.WagerTransactionRepository
-	LedgerRepo  port.LedgerRepository
-	InboxRepo   port.InboxRepository
-	OutboxRepo  port.OutboxRepository
+	WalletRepo port.WalletRepository
+	TxnRepo    port.WagerTransactionRepository
+	LedgerRepo port.LedgerRepository
+	InboxRepo  port.InboxRepository
+	OutboxRepo port.OutboxRepository
 }
 
 func provideRepositories() Repositories {
 	return Repositories{
-		WalletRepo:  postgres.NewWalletRepository(),
-		TxnRepo:     postgres.NewWagerTransactionRepository(),
-		LedgerRepo:  postgres.NewLedgerRepository(),
-		InboxRepo:   postgres.NewInboxRepository(),
-		OutboxRepo:  postgres.NewOutboxRepository(),
+		WalletRepo: postgres.NewWalletRepository(),
+		TxnRepo:    postgres.NewWagerTransactionRepository(),
+		LedgerRepo: postgres.NewLedgerRepository(),
+		InboxRepo:  postgres.NewInboxRepository(),
+		OutboxRepo: postgres.NewOutboxRepository(),
 	}
 }
 

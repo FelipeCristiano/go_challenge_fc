@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/felipecristiano/desafio/internal/application/usecase"
 	apphttp "github.com/felipecristiano/desafio/internal/http"
 	"github.com/felipecristiano/desafio/internal/http/handler"
 	"github.com/felipecristiano/desafio/internal/infra/auth"
 	"github.com/felipecristiano/desafio/internal/infra/db/postgres"
-	"github.com/felipecristiano/desafio/internal/application/usecase"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

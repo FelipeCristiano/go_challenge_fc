@@ -57,7 +57,6 @@ func New(
 	}, nil
 }
 
-
 func Rehydrate(
 	id uuid.UUID,
 	eventType string,
@@ -91,19 +90,18 @@ func Rehydrate(
 	}
 }
 
-
-func (e *OutboxEvent) ID() uuid.UUID              { return e.id }
-func (e *OutboxEvent) EventType() string          { return e.eventType }
-func (e *OutboxEvent) AggregateID() uuid.UUID     { return e.aggregateID }
-func (e *OutboxEvent) AggregateType() string      { return e.aggregateType }
-func (e *OutboxEvent) CorrelationID() *uuid.UUID  { return e.correlationID }
-func (e *OutboxEvent) CausationID() *uuid.UUID    { return e.causationID }
-func (e *OutboxEvent) Payload() json.RawMessage   { return e.payload }
-func (e *OutboxEvent) OccurredAt() time.Time      { return e.occurredAt }
-func (e *OutboxEvent) Version() int               { return e.version }
-func (e *OutboxEvent) PublishedAt() *time.Time    { return e.publishedAt }
-func (e *OutboxEvent) Attempts() int              { return e.attempts }
-func (e *OutboxEvent) NextAttemptAt() time.Time   { return e.nextAttemptAt }
-func (e *OutboxEvent) LastError() *string         { return e.lastError }
-func (e *OutboxEvent) CreatedAt() time.Time       { return e.createdAt }
-func (e *OutboxEvent) IsPublished() bool          { return e.publishedAt != nil }
+func (e *OutboxEvent) ID() uuid.UUID             { return e.id }
+func (e *OutboxEvent) EventType() string         { return e.eventType }
+func (e *OutboxEvent) AggregateID() uuid.UUID    { return e.aggregateID }
+func (e *OutboxEvent) AggregateType() string     { return e.aggregateType }
+func (e *OutboxEvent) CorrelationID() *uuid.UUID { return e.correlationID }
+func (e *OutboxEvent) CausationID() *uuid.UUID   { return e.causationID }
+func (e *OutboxEvent) Payload() json.RawMessage  { return e.payload }
+func (e *OutboxEvent) OccurredAt() time.Time     { return e.occurredAt }
+func (e *OutboxEvent) Version() int              { return e.version }
+func (e *OutboxEvent) PublishedAt() *time.Time   { return e.publishedAt }
+func (e *OutboxEvent) Attempts() int             { return e.attempts }
+func (e *OutboxEvent) NextAttemptAt() time.Time  { return e.nextAttemptAt }
+func (e *OutboxEvent) LastError() *string        { return e.lastError }
+func (e *OutboxEvent) CreatedAt() time.Time      { return e.createdAt }
+func (e *OutboxEvent) IsPublished() bool         { return e.publishedAt != nil }

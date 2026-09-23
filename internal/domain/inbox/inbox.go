@@ -50,9 +50,9 @@ func (m *InboxMessage) IsProcessed() bool {
 	return m.processedAt != nil
 }
 
-func (m *InboxMessage) ID() uuid.UUID          { return m.id }
-func (m *InboxMessage) ConsumerName() string   { return m.consumerName }
-func (m *InboxMessage) MessageID() string      { return m.messageID }
-func (m *InboxMessage) PayloadHash() string    { return m.payloadHash }
-func (m *InboxMessage) ReceivedAt() time.Time  { return m.receivedAt }
+func (m *InboxMessage) ID() uuid.UUID           { return m.id }
+func (m *InboxMessage) ConsumerName() string    { return m.consumerName }
+func (m *InboxMessage) MessageID() string       { return m.messageID }
+func (m *InboxMessage) PayloadHash() string     { return m.payloadHash }
+func (m *InboxMessage) ReceivedAt() time.Time   { return m.receivedAt }
 func (m *InboxMessage) ProcessedAt() *time.Time { return m.processedAt }

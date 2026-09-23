@@ -16,7 +16,6 @@ var (
 	testPlayerID = uuid.New()
 )
 
-
 func TestNew_Success(t *testing.T) {
 	bal, _ := money.NewFromExternalString("1000.00", money.BRL)
 	w, err := wallet.New(testID, testPlayerID, money.BRL, bal)
@@ -77,7 +76,6 @@ func TestNew_NegativeBalance(t *testing.T) {
 	}
 }
 
-
 func TestRehydrate_DoesNotModifyState(t *testing.T) {
 	bal := money.NewFromInt64(50000, money.BRL) // 500.00
 	w := wallet.Rehydrate(testID, testPlayerID, money.BRL, bal, 5, fixedTime(), fixedTime())
@@ -88,7 +86,6 @@ func TestRehydrate_DoesNotModifyState(t *testing.T) {
 		t.Errorf("balance mismatch after rehydration")
 	}
 }
-
 
 func TestDebit_Success(t *testing.T) {
 	w := newWallet(t, "1000.00")
@@ -201,7 +198,6 @@ func TestCredit_CurrencyMismatch(t *testing.T) {
 		t.Errorf("expected ErrCurrencyMismatch, got: %v", err)
 	}
 }
-
 
 func TestConcurrency_TwoDebitsOneWallet_Sequential(t *testing.T) {
 	// Simula comportamento do lock pessimista: execução serial para a mesma carteira.

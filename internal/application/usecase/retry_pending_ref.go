@@ -61,15 +61,17 @@ func (uc *RetryPendingReferencesUseCase) ExecuteBatch(ctx context.Context, batch
 
 	resolvedCount := 0
 	for _, txn := range pendingList {
-		if err := uc.processSinglePending(ctx, txn); err == nil {
+		resolved, err := uc.processSinglePending(ctx, txn)
+		if err == nil && resolved {
 			resolvedCount++
 		}
 	}
 	return resolvedCount, nil
 }
 
-func (uc *RetryPendingReferencesUseCase) processSinglePending(ctx context.Context, txn *transaction.WagerTransaction) error {
-	return uc.uow.WithTx(ctx, func(tx port.DBTX) error {
+func (uc *RetryPendingReferencesUseCase) processSinglePending(ctx context.Context, txn *transaction.WagerTransaction) (bool, error) {
+	var resolved bool
+	err := uc.uow.WithTx(ctx, func(tx port.DBTX) error {
 		// Se excedeu o máximo de retentativas, finaliza como REJECTED
 		if txn.RetryCount() >= uc.maxRetries {
 			observability.WagerRetriesTotal.WithLabelValues("pending_ref", "max_reached").Inc()
@@ -95,7 +97,11 @@ func (uc *RetryPendingReferencesUseCase) processSinglePending(ctx context.Contex
 			if err != nil {
 				return err
 			}
-			return uc.outboxRepo.Create(ctx, tx, outRej)
+			if err := uc.outboxRepo.Create(ctx, tx, outRej); err != nil {
+				return err
+			}
+			resolved = true
+			return nil
 		}
 
 		if txn.ReferenceExternalTransactionID() == nil || txn.ProviderID() == nil {
@@ -151,7 +157,11 @@ func (uc *RetryPendingReferencesUseCase) processSinglePending(ctx context.Contex
 				if err != nil {
 					return err
 				}
-				return uc.outboxRepo.Create(ctx, tx, outRej)
+				if err := uc.outboxRepo.Create(ctx, tx, outRej); err != nil {
+					return err
+				}
+				resolved = true
+				return nil
 			}
 			// Se ainda está PENDING, continua aguardando
 			return nil
@@ -248,6 +258,11 @@ func (uc *RetryPendingReferencesUseCase) processSinglePending(ctx context.Contex
 		if err != nil {
 			return err
 		}
-		return uc.outboxRepo.Create(ctx, tx, outProc)
+		if err := uc.outboxRepo.Create(ctx, tx, outProc); err != nil {
+			return err
+		}
+		resolved = true
+		return nil
 	})
+	return resolved, err
 }

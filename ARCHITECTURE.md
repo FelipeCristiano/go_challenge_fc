@@ -1,17 +1,17 @@
 # ARCHITECTURE.md — Processamento Distribuído de Apostas em Go
 
-Este documento detalha as decisões de engenharia, arquitetura, modelo de dados, tratamento de concorrência e resiliência adotados para atender a todos os requisitos do desafio.
+Este documento detalha as decisões técnicas, modelo de dados, tratamento de concorrência, garantias de integridade financeira, estratégias de resiliência e evidências dos testes de caos adotados no projeto para atender rigorosamente a todos os requisitos do desafio.
 
 ---
 
 ## 1. Visão Geral e Arquitetura
 
-O sistema implementa uma arquitetura distribuída resiliente a falhas e orientada ao domínio (DDD / Ports & Adapters / Clean Architecture), composta por:
-- **API HTTP**: Exposição dos contratos REST para abertura de carteira, envio de apostas, consulta e reconciliação.
-- **Consumidor SQS FIFO**: Entrada assíncrona com garantias estritas de ordenação (`MessageGroupId` por carteira) e idempotência.
-- **PostgreSQL**: Fonte única da verdade contendo o saldo, ledger append-only e tabelas de controle de mensageria (`inbox_messages` e `outbox_events`).
-- **IdP Externo (Keycloak)**: Provedor OAuth 2.0 / OIDC para autenticação via `client_credentials`.
-- **Uber Fx**: Motor de injeção de dependência e gerenciamento do ciclo de vida da aplicação.
+O sistema adota uma arquitetura orientada ao domínio (*Domain-Driven Design*), desacoplada por meio de *Ports & Adapters* (*Clean Architecture / Hexagonal*):
+
+- **Domínio Puro (`internal/domain`)**: Value Objects (`Money`), Agregados (`Wallet`), Entidades (`WagerTransaction`, `WalletLedgerEntry`, `InboxMessage`, `OutboxEvent`) e Eventos de Domínio totalmente livres de dependências de frameworks, banco de dados ou bibliotecas externas.
+- **Camada de Aplicação (`internal/application`)**: Orquestração das regras de negócio através de casos de uso (`OpenWallet`, `ProcessWager`, `ReconcileWallet`, `RetryPendingReferences`) e definição das interfaces de abstração (`port.WalletRepository`, `port.UnitOfWork`, etc.).
+- **Infraestrutura e Adaptadores (`internal/infra`, `internal/http`, `internal/worker`)**: Implementações concretas de persistência com `pgx/v5`, servidor HTTP com roteador `chi`, autenticação Keycloak OIDC/JWKS, consumidor SQS FIFO e publicador Transactional Outbox.
+- **Injeção de Dependências e Ciclo de Vida (`cmd/server`)**: Composição centralizada e tipada utilizando o container **Uber Fx**.
 
 ```
                   ┌───────────────────────────────┐
@@ -53,47 +53,47 @@ O sistema implementa uma arquitetura distribuída resiliente a falhas e orientad
 
 ### 2.1. Escolha do IdP
 - **Tecnologia**: **Keycloak 24**, executado via Docker Compose.
-- **Justificativa**: O Keycloak é um IdP de padrão aberto amplamente adotado na indústria, compatível com as especificações OAuth 2.0 e OpenID Connect (OIDC). Oferece suporte nativo ao fluxo `client_credentials` para autenticação máquina-a-máquina (M2M) entre os provedores de jogos e o backend, além de permitir o provisionamento declarativo via importação automática de realm (`desafio-realm.json`), viabilizando inicialização limpa e determinística nos testes e ambientes locais.
+- **Justificativa**: O Keycloak é um Identity Provider de código aberto aderente aos padrões OAuth 2.0 e OpenID Connect (OIDC). Oferece suporte nativo ao fluxo `client_credentials` para autenticação máquina-a-máquina (M2M) entre provedores de jogos e o backend. Além disso, permite a importação automática e determinística de realms (`scripts/keycloak/desafio-realm.json`), garantindo repetibilidade em ambientes de CI e desenvolvimento.
 - **Fora do escopo**: Cadastro de usuários/senhas e emissão própria de tokens JWT são delegados inteiramente ao IdP.
 
 ### 2.2. Validação de Credenciais e Cache JWKS
-- O serviço backend não compartilha credenciais secretas para validar tokens: a verificação de autenticidade dos tokens JWT é realizada de forma assimétrica e sem estado através do endpoint público **JWKS (JSON Web Key Set)** (`/protocol/openid-connect/certs`).
-- **Cache em Memória com `sync.RWMutex`**: Para evitar sobrecarga de chamadas de rede ao Keycloak a cada requisição HTTP, o validador (`KeycloakValidator`) mantém um cache das chaves públicas RSA indexadas por `kid` com TTL de 15 minutos e suporte a concorrência via double-checked locking (`sync.RWMutex`).
-- O middleware de autenticação valida assinatura, expiração (`exp`), emissor (`iss`) e audiência antes de repassar a requisição aos handlers de negócio.
+- A autenticação dos tokens JWT é realizada de forma **assimétrica e sem estado (stateless)** por meio do conjunto público de chaves RSA exposto no endpoint **JWKS (JSON Web Key Set)** (`/protocol/openid-connect/certs`).
+- **Cache em Memória Concorrente (`sync.RWMutex`)**: Para evitar sobrecarga de requisições de rede ao Keycloak a cada chamada HTTP, o validador (`KeycloakValidator`) mantém um cache das chaves públicas RSA indexadas por `kid` com TTL de 15 minutos, protegido por *double-checked locking* com `sync.RWMutex`.
+- O middleware valida assinatura criptográfica, expiração (`exp`), emissor (`iss`) e audiência antes de repassar a requisição aos handlers de negócio.
 
-### 2.3. Modelo de Permissões e Isolamento de Provedores
+### 2.3. Modelo de Permissões e Isolamento Estrito de Provedores
 - **Papéis (Roles)**:
-  - `internal`: Destinado a operações internas e de infraestrutura administrativa (ex.: `POST /wallets` e `POST /wallets/:walletId/reconciliation`).
-  - `provider`: Destinado aos provedores externos de jogos para submissão de transações (`POST /wagering/transactions`) e consultas.
+  - `internal`: Destinado a operações internas e administrativas de infraestrutura (ex.: abertura de carteiras em `POST /wallets` e reconciliação financeira em `POST /wallets/:walletId/reconciliation`).
+  - `provider`: Destinado aos provedores de jogos para envio de apostas (`POST /wagering/transactions`) e consultas.
 - **Isolamento de Tenants (Provedores)**:
-  - O `providerId` autorizado é extraído diretamente da claim de identidade do token (`sub` / `clientId`).
-  - Um provedor (`provider-a`) é rigorosamente impedido de consultar, processar apostas ou executar replays em nome de outro (`provider-b`).
-  - Qualquer discrepância entre a identidade autenticada e o `providerId` da requisição é rejeitada no middleware ou no caso de uso com erro de autorização imediato, sem efeitos colaterais no banco de dados.
+  - A identidade do provedor autenticado é extraída de forma inviolável da claim do token JWT (`sub` / `clientId`).
+  - Um provedor (`provider-a`) é rigorosamente proibido de consultar, processar ou receber replays de transações de outro provedor (`provider-b`).
+  - Qualquer discrepância entre a identidade autenticada e o `providerId` da rota ou do payload é imediatamente bloqueada no middleware ou no caso de uso com código `403 Forbidden`, sem produzir nenhum efeito colateral no banco de dados.
 
 ---
 
 ## 3. Dinheiro e Mapeamento de `Money`
 
-### 3.1. Representação e Eliminação de Ponto Flutuante
-- **Proibição absoluta de `float32` e `float64`**: Números em ponto flutuante introduzem imprecisões binárias inaceitáveis em cálculos financeiros.
-- **Representação Interna**: O Value Object `Money` utiliza **`int64` em unidades mínimas (centavos)**, associado à moeda (`ISO 4217`).
+### 3.1. Eliminação Absoluta de Ponto Flutuante
+- **Proibição de `float32` e `float64`**: Números em ponto flutuante binário introduzem erros de arredondamento inaceitáveis no domínio bancário e de apostas.
+- **Representação Interna**: O Value Object `Money` opera internamente com **`int64` representando a quantia na menor fração da moeda (centavos)**, associado à sua moeda (`ISO 4217`).
   - Exemplo: `R$ 25.00` é representado como `2500` centavos na moeda `BRL`.
-- **Limites e Proteção contra Overflow**:
-  - `int64` suporta valores até `9.223.372.036.854.775.807` centavos (~92 trilhões de BRL), suficiente para qualquer volume financeiro.
-  - As operações `Add`, `Sub` e `Neg` validam overflow/underflow em tempo de execução com erro explícito.
+- **Proteção contra Overflow e Underflow**:
+  - `int64` suporta valores até `9.223.372.036.854.775.807` centavos (~92 trilhões de BRL).
+  - Todas as operações aritméticas (`Add`, `Sub`, `Neg`) verificam limites em tempo de execução, retornando erro explícito em caso de overflow.
 
 ### 3.2. Contrato Externo e Parsing Estrito
-- O contrato de entrada e saída utiliza strings decimais formatadas:
+- Contrato JSON:
   ```json
   { "amount": "25.00", "currency": "BRL" }
   ```
 - O parser de entrada externa (`NewFromExternalString`):
-  - Exige exatamente duas casas decimais após o ponto (`.`).
-  - Rejeita valores nulos, vazios, notação científica (`1e5`), caracteres alfanuméricos e palavras reservadas (`NaN`, `Infinity`).
+  - Exige rigorosamente duas casas decimais após o ponto (`.`).
   - Rejeita quantias negativas em entradas externas (quantias negativas só existem como resultados intermediários de diferenças internas).
+  - Rejeita valores nulos, strings vazias, notação científica (`1e5`), caracteres alfanuméricos e literais especiais (`NaN`, `Infinity`).
 
 ### 3.3. Persistência no PostgreSQL
-- No banco de dados, o dinheiro é persistido diretamente como:
+- O schema SQL mapeia os valores monetários diretamente como:
   ```sql
   money_amount   BIGINT        NOT NULL CHECK (money_amount >= 0),
   money_currency currency_code NOT NULL
@@ -104,24 +104,24 @@ O sistema implementa uma arquitetura distribuída resiliente a falhas e orientad
 
 ## 4. Transações SQL e Delimitação entre Repositórios
 
-### 4.1. Biblioteca de Acesso ao Banco: `pgx/v5`
-- **Escolha**: Driver nativo **`jackc/pgx/v5`** com SQL explícito.
-- **Justificativa**: `pgx` é o driver de maior performance e menor consumo de memória para PostgreSQL em Go. O uso de SQL explícito torna locks, transações e restrições totalmente auditáveis e transparentes, eliminando a opacidade e os riscos de geração de queries ineficientes de ORMs.
+### 4.1. Driver de Banco de Dados: `pgx/v5`
+- **Escolha**: Driver nativo **`jackc/pgx/v5`** com pool de conexões (`*pgxpool.Pool`) e comandos SQL parametrizados explícitos.
+- **Justificativa**: `pgx` oferece máxima performance, controle granular de transações e ausência de abstrações opacas típicas de ORMs pesados.
 
 ### 4.2. Delimitação Transacional com Unit of Work
 - A integridade financeira é mantida por meio do padrão **Unit of Work** (`uow.WithTx`), garantindo que **uma operação financeira equivale a uma única transação SQL atômica**.
-- Os repositórios recebem a interface `port.DBTX`, podendo operar com `*pgxpool.Pool` ou `pgx.Tx`.
+- Os repositórios recebem a interface genérica `port.DBTX`, permitindo operar transparentemente dentro de uma transação (`pgx.Tx`) ou diretamente sobre o pool (`*pgxpool.Pool`).
 
 ### 4.3. Fronteira da Transação Atômica
 Todas as seguintes mutações ocorrem atomicamente em um único `BEGIN ... COMMIT`:
-1. Inserção na `inbox_messages` (se a mensagem originou-se do SQS FIFO).
+1. Inserção na tabela `inbox_messages` (se a mensagem originou-se do SQS FIFO).
 2. Lock pessimista da carteira: `SELECT ... FROM wallets WHERE id = $1 FOR UPDATE`.
-3. Verificação e débito/crédito do saldo em memória e persistência em `wallets` (com incremento de versão).
-4. Persistência da `wager_transactions` (armazenando status, payload hash e saldo da época).
-5. Inserção do lançamento imutável em `wallet_ledger_entries`.
-6. Enfileiramento do evento na tabela `outbox_events` (Transactional Outbox).
+3. Validação de saldo e débito/crédito em memória com incremento da versão da carteira (`version + 1`).
+4. Persistência da entidade `wager_transactions` (registrando status, payload hash e saldo após o movimento).
+5. Inserção do lançamento imutável na tabela `wallet_ledger_entries`.
+6. Gravação do evento na tabela `outbox_events` (Transactional Outbox).
 
-Se ocorrer falha em qualquer etapa (ou queda abrupta de energia), o PostgreSQL realiza o rollback automático de todas as alterações, impedindo estados inconsistentes.
+Se ocorrer falha em qualquer etapa (ou queda abrupta do processo), o PostgreSQL realiza o rollback automático de todas as alterações, impedindo estados parciais ou saldos inconsistentes.
 
 ---
 
@@ -136,66 +136,60 @@ Se ocorrer falha em qualquer etapa (ou queda abrupta de energia), o PostgreSQL r
   FOR UPDATE;
   ```
 - **Por que não Optimistic Concurrency Control (OCC) com retry?**
-  Em cenários de alta disputa na mesma carteira (como jogos rápidos), retentativas otimistas causam tempestades de contenção (*retry storms*), desperdício de CPU e aumentam a latência da cauda (p99).
-- **Paralelismo Real**: O lock é estritamente granular no registro da carteira (`WHERE id = $1`). Carteiras diferentes de jogadores distintos executam 100% em paralelo, sendo terminantemente proibido qualquer lock global na aplicação.
+  Em jogos de alta frequência de apostas onde múltiplas requisições chegam para a mesma carteira simultaneamente, o controle otimista gera tempestades de colisão (*retry storms*), desperdício de CPU, esgotamento do pool de conexões e degradação severa da latência de cauda (p99). O lock pessimista serializa as operações de forma previsível e determinística.
+- **Granularidade do Lock**: O lock é estritamente a nível da linha da carteira (`WHERE id = $1`). Carteiras diferentes de jogadores distintos executam 100% em paralelo, sendo terminantemente proibido qualquer lock global na aplicação.
 
 ### 5.2. Cenário Concorrente Obrigatório (2 apostas de 80.00 sobre saldo de 100.00)
 - Três ou mais instâncias concorrentes recebendo operações na mesma carteira são serializadas pela fila do lock `FOR UPDATE` do PostgreSQL.
 - A primeira requisição adquire o lock, debita `80.00`, atualiza a carteira para `20.00` e commita.
 - A segunda requisição obtém o lock, lê o saldo atualizado de `20.00`, detecta fundos insuficientes, não altera o saldo, registra a aposta como `REJECTED` (`failureCode: INSUFFICIENT_FUNDS`) e commita.
-- O saldo final permanece `20.00 BRL` e o ledger registra exatamente 1 débito.
+- O saldo final permanece exatamente `20.00 BRL` e o ledger registra estritamente 1 débito.
 
 ---
 
-## 6. Idempotência e Reprodução do Resultado Original
+## 6. Idempotência Durável e Resolução de Concorrência
 
-A solução implementa idempotência durável em 3 níveis:
+A solução implementa idempotência durável em múltiplos níveis:
 
 1. **Unicidade no Banco de Dados**:
    - `UNIQUE (idempotency_key)`: Garante que nenhuma operação com a mesma chave seja processada duas vezes.
    - `UNIQUE (provider_id, external_transaction_id)`: Impede que a mesma transação externa seja cadastrada sob chaves de idempotência diferentes.
 2. **Hash Canônico de Payload (`CanonicalPayloadHash`)**:
-   - É gerado o SHA-256 de um JSON ordenado lexicograficamente com os campos de negócio (`providerId`, `externalTransactionId`, `playerId`, `walletId`, `roundId`, `gameId`, `kind`, `money`).
-   - Garante que a representação seja estritamente determinística tanto para requisições vindas da **API HTTP** quanto para mensagens consumidas do **SQS FIFO**, independentemente da ordem em que os campos foram enviados pelo cliente.
-   - Metadados de transporte (`Idempotency-Key`, `X-Correlation-ID`, headers SQS) são excluídos do cálculo do hash.
+   - É gerado o hash SHA-256 de um JSON formatado canonicamente (chaves ordenadas lexicograficamente) contendo os campos essenciais de negócio: `providerId`, `externalTransactionId`, `playerId`, `walletId`, `roundId`, `gameId`, `kind`, `money` e `referenceExternalTransactionId`.
+   - Metadados voláteis de transporte (`Idempotency-Key`, `X-Correlation-ID`, headers HTTP/SQS) são expressamente excluídos do hash.
    - Se uma chave existente for reenviada com payload diferente, o sistema retorna `409 Conflict` (`ErrPayloadConflict`).
-3. **Replay Idempotente com Saldo Histórico**:
-   - Ao detectar reenvio de operação já processada (`PROCESSED`), a aplicação devolve o snapshot exato gravado em `result_balance_amount` da transação original, mesmo que a carteira tenha tido outras movimentações posteriores.
-   - O campo `idempotentReplay: true` é retornado com status `200 OK`.
-
-### 6.1. Mapeamento de Códigos de Status HTTP
-
-| Código | Cenário de Resposta |
-|---|---|
-| **`200 OK`** | Operação financeira processada com sucesso (`PROCESSED`) ou Replay Idempotente (`idempotentReplay: true`). |
-| **`201 Created`** | Carteira aberta com sucesso (`POST /wallets`). |
-| **`202 Accepted`** | Reversão criada em estado de espera (`PENDING_REFERENCE`). |
-| **`400 Bad Request`** | Erro de parsing em `Money` (ex.: float, notação científica), campos obrigatórios ausentes ou payload inválido. |
-| **`401 Unauthorized`** | Cabeçalho `Authorization` ausente, token malformado, expirado ou com assinatura inválida pelo JWKS. |
-| **`403 Forbidden`** | Tenant mismatch (token de `provider-a` tentando operar em nome de `provider-b`), ausência do papel necessário (`internal`) ou tentativa externa de submeter transação `OPENING`. |
-| **`404 Not Found`** | Carteira ou transação inexistente. |
-| **`409 Conflict`** | Conflito de payload para a mesma chave de idempotência (`ErrPayloadConflict`) ou tentativa de criar carteira duplicada para o mesmo jogador e moeda (`ErrWalletAlreadyExists`). |
+3. **Resolução de Concorrência e Corridas Simultâneas (*Race-Recovery*)**:
+   - Quando duas requisições paralelas chegam com a mesma chave antes que qualquer uma tenha comitado:
+     - Ambas não encontram a transação no passo inicial de leitura.
+     - A primeira adquire o lock `FOR UPDATE` na carteira e a segunda bloqueia.
+     - A primeira insere os registros e comita.
+     - A segunda desbloqueia do lock da carteira e tenta inserir em `wager_transactions`. O PostgreSQL acusa violação de chave única (`23505`), gerando `ErrDuplicateOperation`.
+     - A camada de aplicação intercepta `ErrDuplicateOperation`, reabre uma transação de leitura limpa, recupera o registro comitado pelo concorrente, valida o hash de payload e devolve o resultado original com `idempotentReplay: true`.
+4. **Replay com Saldo Histórico**:
+   - Ao executar o replay de uma operação `PROCESSED`, a aplicação devolve o snapshot exato gravado em `result_balance_amount` da transação original, mesmo que a carteira tenha sofrido mutações subsequentes.
 
 ---
 
-## 7. Referências Pendentes e Reversões
+## 7. Referências Pendentes e Regras de Reversão
 
 ### 7.1. Referências Pendentes (`PENDING_REFERENCE`)
-- Se uma operação `REFUND` ou `ROLLBACK` for recebida antes da transação original que ela referencia, a aplicação:
-  1. Cria a transação em estado `PENDING_REFERENCE`.
-  2. Publica o evento `WagerTransactionPendingReference` na outbox.
-  3. Define o campo `retry_after` com backoff exponencial.
-- Um worker em background (`PendingReferenceWorker`) busca transações com `status = 'PENDING_REFERENCE' AND retry_after <= NOW()`, tentando resolver a referência.
+- Se uma operação `REFUND` ou `ROLLBACK` for recebida antes da transação original que ela referencia:
+  1. A transação é persistida com status `PENDING_REFERENCE`.
+  2. Um evento `WagerTransactionPendingReference` é gravado na outbox.
+  3. O campo `retry_after` é calculado com backoff exponencial (`retry_count`).
+- Um worker em background (`PendingReferenceWorker`) busca transações com `status = 'PENDING_REFERENCE' AND retry_after <= NOW()`, tentando resolver a referência periodicamente.
+- Quando a aposta original é processada, a próxima execução do worker encontra a transação de referência, valida as regras e aplica o movimento financeiro correspondente, transicionando o status para `PROCESSED`.
 - Ao atingir o limite máximo de tentativas (`PENDING_REF_MAX_RETRIES`), a transação é finalizada como `REJECTED` com `failureCode: REFERENCE_NOT_FOUND`.
 
 ### 7.2. Regras de Reversão (`REFUND` e `ROLLBACK`)
-- **`REFUND`**: Devolve integralmente o valor de uma `BET` processada na mesma rodada (gera crédito).
+- **`REFUND`**: Devolve integralmente o valor de uma `BET` processada na mesma rodada (gera crédito). Deve referenciar obrigatoriamente uma transação do tipo `BET`.
 - **`ROLLBACK`**: Inverte o movimento financeiro da transação referenciada:
   - Rollback de `BET` (débito) gera crédito.
   - Rollback de `WIN` (crédito) gera débito.
   - Rollback de `REFUND` (crédito) gera débito.
 - **Rollback com Saldo Insuficiente**: Se um Rollback de crédito precisar debitar um saldo que o jogador já sacou/gastou, ele é rejeitado e auditado com o código `ROLLBACK_INSUFFICIENT_FUNDS` (distinto de `INSUFFICIENT_FUNDS` de apostas normais).
 - **Prevenção de Dupla Reversão**: Uma referência só aceita uma reversão bem-sucedida de cada tipo. Combinações conflitantes são rejeitadas com `REFERENCE_ALREADY_REVERSED`.
+- **Transação `OPENING`**: Operação exclusivamente interna gerada na abertura de carteira. Se recebida via HTTP ou SQS por um provedor externo, é rejeitada com `403 Forbidden` (`OPENING_FORBIDDEN`).
 
 ---
 
@@ -203,7 +197,7 @@ A solução implementa idempotência durável em 3 níveis:
 
 ### 8.1. Inbox Pattern e Consumo SQS FIFO
 - A tabela `inbox_messages` possui restrição única `UNIQUE (consumer_name, message_id)`.
-- No consumo do SQS, a inserção na inbox ocorre dentro da mesma transação do domínio (`port.UnitOfWork`).
+- No consumo do SQS, a inserção na inbox ocorre dentro da mesma transação SQL do domínio (`port.UnitOfWork`).
 - Mensagens reentregues pelo broker com o mesmo `messageId` são identificadas e não duplicam operações financeiras.
 - **Remoção Pós-Commit (`DeleteMessage`)**: A exclusão da mensagem na fila SQS só é invocada **após** a conclusão e o commit bem-sucedido de toda a transação no PostgreSQL. Caso o processo seja interrompido abruptamente ou a transação sofra rollback, a mensagem permanece intacta na fila e será reprocessada com segurança por outra instância.
 - **Liberação Imediata de Visibilidade (`ChangeMessageVisibility(0)`)**: Em caso de falhas transitórias de infraestrutura (ex.: indisponibilidade momentânea de banco), o consumidor zera o timeout de visibilidade da mensagem, disponibilizando-a imediatamente para redrive sem bloquear o pipeline até atingir o limite de DLQ (`wager-transactions-dlq.fifo`).
@@ -211,7 +205,7 @@ A solução implementa idempotência durável em 3 níveis:
 
 ### 8.2. Transactional Outbox Pattern (Publicador de Eventos)
 - Eventos de domínio são persistidos na tabela `outbox_events` na mesma transação SQL que altera o saldo e grava o ledger.
-- **Worker Multinstância**: Múltiplos processos publicadores consultam a outbox concorrentemente utilizando:
+- **Worker Multinstância Concorrente**: Múltiplos processos publicadores consultam a outbox concorrentemente utilizando:
   ```sql
   SELECT id, event_type, payload
   FROM outbox_events
@@ -271,9 +265,9 @@ O encerramento ordenado é gerenciado pelos hooks de `fx.Lifecycle`:
 
 ## 12. Limitações e Interpretações Adotadas
 
-1. **Moedas Suportadas**: O schema suporta enum `currency_code ('BRL', 'USD', 'EUR')`. A expansão para outras moedas requer atualização de migration.
-2. **Partidas Dobradas**: Conforme permitido pelo desafio, foi adotado ledger append-only granular por carteira, dispensando partidas dobradas globais.
-3. **Cache de Chaves JWKS**: O middleware mantém cache em memória das chaves públicas do Keycloak para evitar chamadas de rede repetidas por requisição.
+1. **Moedas Suportadas**: O schema suporta o tipo enum `currency_code ('BRL', 'USD', 'EUR')`. A inclusão de novas moedas requer migration com alteração de enum.
+2. **Partidas Dobradas**: Conforme permitido explicitamente pelo desafio, adotou-se o modelo de ledger append-only granular por carteira, que garante auditoria completa de saldo sem exigir partidas dobradas globais.
+3. **Cache de Chaves JWKS**: O middleware mantém cache em memória com TTL de 15 minutos para chaves públicas do Keycloak, evitando requisições HTTP repetitivas por chamada de API.
 4. **Trabalho Concluído**:
    - [x] Fase 1: Infraestrutura (Docker Compose, PostgreSQL, LocalStack, Keycloak, Migrations)
    - [x] Fase 2: Modelo de Domínio (`Money`, `Wallet`, `WagerTransaction`, `WalletLedgerEntry`, `Events`, `Inbox`, `Outbox`)
@@ -284,5 +278,64 @@ O encerramento ordenado é gerenciado pelos hooks de `fx.Lifecycle`:
    - [x] Fase 7: Outbox Worker (Publicador com FOR UPDATE SKIP LOCKED, backoff exponencial, deduplicação estável por eventId)
    - [x] Fase 8: Composição Uber Fx (`cmd/server/main.go`, injeção de dependência e hooks de ciclo de vida com shutdown gracioso)
    - [x] Fase 9: Observabilidade completa (Métricas Prometheus via `/metrics`, rastreabilidade JSON por `slog`, health checks)
-5. **Trabalho a Seguir**:
-   - [ ] Fase 10: Testes distribuídos de concorrência e recuperação
+   - [x] Fase 10: Testes distribuídos de concorrência, idempotência e caos (Seção 13 do DESAFIO.md)
+   - [x] Fase 11: Documentação completa (`README.md`, `ARCHITECTURE.md`, `.env.example`)
+
+---
+
+## 13. Testes Distribuídos de Concorrência, Idempotência e Caos (Seção 13)
+
+A integridade do sistema em ambientes distribuídos hostis foi comprovada por meio da suíte de integração em [`tests/concurrency_test.go`](file:///C:/Users/fcristiano/Documents/Projetos/go/desafio/tests/concurrency_test.go), executada contra instâncias reais de PostgreSQL, LocalStack SQS e Keycloak:
+
+### 13.1. 50 Apostas Simultâneas da Mesma Operação (`TestConcurrency_50SameBet_SingleDebit`)
+- **Cenário**: 50 goroutines submetem simultaneamente requisições com idêntica chave de idempotência (`provider-a:tx-xxx`) e idêntico payload para debitar 25.00 BRL de um saldo de 1.000,00 BRL.
+- **Resultado Comprovado**:
+  - Exatamente 1 débito financeiro é aplicado na carteira e gravado no ledger append-only.
+  - As outras 49 requisições recebem resposta de sucesso com `idempotentReplay: true`, retornando o mesmo saldo e a mesma transação original.
+  - Saldo final da carteira: exatamente 975,00 BRL.
+  - Reconciliação do ledger: divergência zero (`storedBalance == sum(credits - debits)`).
+
+### 13.2. Disputa Concorrente de 2 Apostas de 80.00 sobre Saldo 100.00 (`TestConcurrency_Two80BetsOn100Balance`)
+- **Cenário**: Saldo de 100,00 BRL disputado simultaneamente por 2 apostas distintas de 80,00 BRL cada.
+- **Resultado Comprovado**:
+  - A serialização atômica via `SELECT FOR UPDATE` na linha da carteira garante que apenas 1 aposta obtenha status `PROCESSED`.
+  - A segunda aposta falha de forma determinística com status `REJECTED` (`INSUFFICIENT_FUNDS`), sem saldo negativo.
+  - Saldo final preservado: exatamente 20,00 BRL.
+
+### 13.3. Alto Paralelismo em Carteiras Distintas (`TestConcurrency_DistinctWallets_HighParallelism`)
+- **Cenário**: 10 carteiras distintas sofrem operações simultâneas de débito.
+- **Resultado Comprovado**:
+  - Ausência de contenção cruzada ou deadlocks no banco de dados.
+  - Todas as 10 carteiras atingem consistência absoluta e reconciliação perfeita com o ledger.
+
+### 13.4. Múltiplas Instâncias HTTP Independentes (`TestConcurrency_MultiInstance_Distributed`)
+- **Cenário**: 3 instâncias de servidor HTTP (`net/http` + `chi`) rodando em paralelo, apontando para o mesmo PostgreSQL compartilhado, processam 30 apostas concorrentes de 10,00 BRL sobre uma carteira de 300,00 BRL.
+- **Resultado Comprovado**:
+  - Todas as 30 apostas são processadas com sucesso distribuído entre os 3 servidores.
+  - Saldo final: exatamente 0,00 BRL.
+  - Integridade confirmada no banco centralizado sem nenhuma atualização perdida (*lost update*).
+
+### 13.5. Chaos no Consumidor SQS e Deduplicação via Inbox (`TestChaos_SQSConsumer_RedeliveryDeduplication`)
+- **Cenário**: Simulação de crash abrupto da instância após o commit no PostgreSQL, mas antes da chamada de `DeleteMessage` no SQS. A mensagem é então reentregue pelo broker para outro worker diferente.
+- **Resultado Comprovado**:
+  - O segundo worker detecta a mensagem na tabela `inbox_messages` e consulta a transação existente.
+  - Retorna replay idempotente sem executar novo débito na carteira e sem criar novo lançamento no ledger.
+  - Total de lançamentos no ledger: estritamente 1 crédito de abertura + 1 débito de aposta.
+
+### 13.6. Disputa de Múltiplos Publicadores de Outbox com `SKIP LOCKED` (`TestConcurrency_DualOutboxPublishers`)
+- **Cenário**: 2 instâncias do worker de Outbox executam em paralelo disputando um lote de eventos pendentes no banco.
+- **Resultado Comprovado**:
+  - `FOR UPDATE SKIP LOCKED` particiona o lote perfeitamente entre os dois processos sem bloqueio nem contenção.
+  - 100% dos eventos pendentes são publicados no SQS FIFO sem duplicatas de processamento.
+  - Nenhuma mensagem órfã ou pendente resta na tabela.
+
+### 13.7. Resolução de Referências Desordenadas e Expiração (`TestChaos_PendingReference_ResolutionAndExpiration`)
+- **Cenário A**: `REFUND` chega antes da aposta original (`BET`). A transação é aceita como `PENDING_REFERENCE`. Ao chegar a aposta original, o worker de retentativas resolve a referência e aplica o crédito de 25,00 BRL, restaurando o saldo para 100,00 BRL.
+- **Cenário B**: Reversão órfã que nunca recebe a transação referenciada. Após atingir `maxRetries` (5 tentativas), o worker finaliza a transação como `REJECTED` (`REFERENCE_NOT_FOUND`) e emite o evento de rejeição correspondente na outbox.
+
+### 13.8. Deduplicação Cruzada entre HTTP e SQS (`TestConcurrency_CrossHTTPAndSQS_Deduplication`)
+- **Cenário**: Submissão estritamente paralela da mesma aposta (mesma chave de idempotência e mesmo payload) via endpoint REST HTTP e via mensagem em lote SQS.
+- **Resultado Comprovado**:
+  - Uma das chamadas atua como a criadora original (`idempotentReplay: false`) e a outra como replay idempotente imediato (`idempotentReplay: true`).
+  - Ambas retornam o mesmo saldo final de 450,00 BRL.
+  - Zero duplicação financeira e ledger auditável com conciliação íntegra.

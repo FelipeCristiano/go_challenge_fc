@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-
 func brl(s string) money.Money {
 	m, err := money.NewFromExternalString(s, money.BRL)
 	if err != nil {
@@ -36,7 +35,6 @@ func newExternalTxn(t *testing.T, kind transaction.Kind, amount string, ref *str
 }
 
 func refPtr(s string) *string { return &s }
-
 
 func TestNewExternal_BET(t *testing.T) {
 	txn := newExternalTxn(t, transaction.KindBet, "25.00", nil)
@@ -148,7 +146,6 @@ func TestNewExternal_OpeningForbidden(t *testing.T) {
 	}
 }
 
-
 func TestNewOpening_Success(t *testing.T) {
 	txn, err := transaction.NewOpening(uuid.New(), uuid.New(), uuid.New(), brl("1000.00"))
 	if err != nil {
@@ -177,7 +174,6 @@ func TestNewOpening_ZeroAmountRejected(t *testing.T) {
 		t.Error("OPENING with zero amount must be rejected")
 	}
 }
-
 
 func TestMarkProcessed_FromPending(t *testing.T) {
 	txn := newExternalTxn(t, transaction.KindBet, "25.00", nil)
@@ -243,7 +239,6 @@ func TestMarkFailed(t *testing.T) {
 	}
 }
 
-
 func TestTerminalStates_NoTransition(t *testing.T) {
 	terminals := []transaction.Status{
 		transaction.StatusProcessed,
@@ -277,7 +272,6 @@ func TestTerminalStates_NoTransition(t *testing.T) {
 	}
 }
 
-
 func TestMarkPendingReference_OnlyFromPending(t *testing.T) {
 	txn := newExternalTxn(t, transaction.KindRefund, "25.00", refPtr("ref"))
 	_ = txn.MarkPendingReference(time.Now().Add(5 * time.Second))
@@ -303,26 +297,25 @@ func TestIncrementRetry(t *testing.T) {
 	}
 }
 
-
 func TestDirectionFor(t *testing.T) {
 	betKind := transaction.KindBet
 	winKind := transaction.KindWin
 	refundKind := transaction.KindRefund
 
 	cases := []struct {
-		kind     transaction.Kind
-		refKind  *transaction.Kind
-		wantDir  string
-		wantErr  bool
+		kind    transaction.Kind
+		refKind *transaction.Kind
+		wantDir string
+		wantErr bool
 	}{
 		{transaction.KindBet, nil, "DEBIT", false},
 		{transaction.KindWin, nil, "CREDIT", false},
 		{transaction.KindRefund, nil, "CREDIT", false},
 		{transaction.KindLoss, nil, "", true},
-		{transaction.KindRollback, &betKind, "CREDIT", false},    // desfaz débito de BET → crédito
-		{transaction.KindRollback, &winKind, "DEBIT", false},     // desfaz crédito de WIN → débito
-		{transaction.KindRollback, &refundKind, "DEBIT", false},  // desfaz crédito de REFUND → débito
-		{transaction.KindRollback, nil, "", true},                 // sem referência → erro
+		{transaction.KindRollback, &betKind, "CREDIT", false},   // desfaz débito de BET → crédito
+		{transaction.KindRollback, &winKind, "DEBIT", false},    // desfaz crédito de WIN → débito
+		{transaction.KindRollback, &refundKind, "DEBIT", false}, // desfaz crédito de REFUND → débito
+		{transaction.KindRollback, nil, "", true},               // sem referência → erro
 		{transaction.KindOpening, nil, "CREDIT", false},
 	}
 

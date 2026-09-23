@@ -17,27 +17,27 @@ const (
 const schemaVersion = 1
 
 type Envelope struct {
-	EventID       uuid.UUID   `json:"eventId"`
-	EventType     string      `json:"eventType"`
-	AggregateID   uuid.UUID   `json:"aggregateId"`
-	AggregateType string      `json:"aggregateType"`
-	CorrelationID uuid.UUID   `json:"correlationId"`
-	CausationID   *uuid.UUID  `json:"causationId,omitempty"`
-	OccurredAt    time.Time   `json:"occurredAt"`
-	Version       int         `json:"version"`
+	EventID       uuid.UUID  `json:"eventId"`
+	EventType     string     `json:"eventType"`
+	AggregateID   uuid.UUID  `json:"aggregateId"`
+	AggregateType string     `json:"aggregateType"`
+	CorrelationID uuid.UUID  `json:"correlationId"`
+	CausationID   *uuid.UUID `json:"causationId,omitempty"`
+	OccurredAt    time.Time  `json:"occurredAt"`
+	Version       int        `json:"version"`
 }
 
 type WagerTransactionProcessedData struct {
-	TransactionID         uuid.UUID  `json:"transactionId"`
-	WalletID              uuid.UUID  `json:"walletId"`
-	PlayerID              uuid.UUID  `json:"playerId"`
-	ProviderID            *string    `json:"providerId,omitempty"`
-	ExternalTransactionID *string    `json:"externalTransactionId,omitempty"`
-	Kind                  string     `json:"kind"`
-	MoneyAmount           string     `json:"moneyAmount"`
-	MoneyCurrency         string     `json:"moneyCurrency"`
-	ResultBalanceAmount   string     `json:"resultBalanceAmount"`
-	ResultBalanceCurrency string     `json:"resultBalanceCurrency"`
+	TransactionID         uuid.UUID `json:"transactionId"`
+	WalletID              uuid.UUID `json:"walletId"`
+	PlayerID              uuid.UUID `json:"playerId"`
+	ProviderID            *string   `json:"providerId,omitempty"`
+	ExternalTransactionID *string   `json:"externalTransactionId,omitempty"`
+	Kind                  string    `json:"kind"`
+	MoneyAmount           string    `json:"moneyAmount"`
+	MoneyCurrency         string    `json:"moneyCurrency"`
+	ResultBalanceAmount   string    `json:"resultBalanceAmount"`
+	ResultBalanceCurrency string    `json:"resultBalanceCurrency"`
 }
 
 type WagerTransactionProcessed struct {
@@ -79,7 +79,6 @@ func NewWagerTransactionProcessed(
 		},
 	}
 }
-
 
 type WagerTransactionRejectedData struct {
 	TransactionID         uuid.UUID `json:"transactionId"`
@@ -126,7 +125,6 @@ func NewWagerTransactionRejected(
 		},
 	}
 }
-
 
 type WalletBalanceChangedData struct {
 	WalletID              uuid.UUID `json:"walletId"`
@@ -179,8 +177,6 @@ func NewWalletBalanceChanged(
 		},
 	}
 }
-
-
 
 type WagerTransactionPendingReferenceData struct {
 	TransactionID                  uuid.UUID `json:"transactionId"`

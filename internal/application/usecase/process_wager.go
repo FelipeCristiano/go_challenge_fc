@@ -40,11 +40,11 @@ type ProcessWagerInput struct {
 }
 
 type ProcessWagerOutput struct {
-	TransactionID   uuid.UUID
-	Status          transaction.Status
-	Balance         money.Money
+	TransactionID    uuid.UUID
+	Status           transaction.Status
+	Balance          money.Money
 	IdempotentReplay bool
-	FailureCode     *string
+	FailureCode      *string
 }
 
 type ProcessWagerUseCase struct {
@@ -157,6 +157,13 @@ func (uc *ProcessWagerUseCase) Execute(ctx context.Context, input ProcessWagerIn
 		// Verifica se a operação externa já existe com outra chave de idempotência
 		existingByExternal, err := uc.txnRepo.GetByProviderAndExternalID(ctx, tx, input.ProviderID, input.ExternalTransactionID)
 		if err == nil && existingByExternal != nil {
+			if existingByExternal.IdempotencyKey() != nil && *existingByExternal.IdempotencyKey() == input.IdempotencyKey {
+				if existingByExternal.PayloadHash() != nil && *existingByExternal.PayloadHash() != currentHash {
+					return errs.ErrPayloadConflict
+				}
+				output = uc.buildReplayOutput(existingByExternal)
+				return nil
+			}
 			return errs.ErrPayloadConflict
 		} else if err != nil && !errors.Is(err, errs.ErrTransactionNotFound) {
 			return err
@@ -227,9 +234,9 @@ func (uc *ProcessWagerUseCase) Execute(ctx context.Context, input ProcessWagerIn
 				}
 
 				output = &ProcessWagerOutput{
-					TransactionID:   txnID,
-					Status:          transaction.StatusPendingReference,
-					Balance:         w.Balance(),
+					TransactionID:    txnID,
+					Status:           transaction.StatusPendingReference,
+					Balance:          w.Balance(),
 					IdempotentReplay: false,
 				}
 				return nil
@@ -246,11 +253,11 @@ func (uc *ProcessWagerUseCase) Execute(ctx context.Context, input ProcessWagerIn
 					return err
 				}
 				output = &ProcessWagerOutput{
-					TransactionID:   txn.ID(),
-					Status:          transaction.StatusRejected,
-					Balance:         w.Balance(),
+					TransactionID:    txn.ID(),
+					Status:           transaction.StatusRejected,
+					Balance:          w.Balance(),
 					IdempotentReplay: false,
-					FailureCode:     &failCode,
+					FailureCode:      &failCode,
 				}
 				return nil
 			}
@@ -306,11 +313,11 @@ func (uc *ProcessWagerUseCase) Execute(ctx context.Context, input ProcessWagerIn
 				return err
 			}
 			output = &ProcessWagerOutput{
-				TransactionID:   txn.ID(),
-				Status:          transaction.StatusRejected,
-				Balance:         w.Balance(),
+				TransactionID:    txn.ID(),
+				Status:           transaction.StatusRejected,
+				Balance:          w.Balance(),
 				IdempotentReplay: false,
-				FailureCode:     &failCode,
+				FailureCode:      &failCode,
 			}
 			return nil
 		}
@@ -394,15 +401,44 @@ func (uc *ProcessWagerUseCase) Execute(ctx context.Context, input ProcessWagerIn
 		}
 
 		output = &ProcessWagerOutput{
-			TransactionID:   txnID,
-			Status:          transaction.StatusProcessed,
-			Balance:         w.Balance(),
+			TransactionID:    txnID,
+			Status:           transaction.StatusProcessed,
+			Balance:          w.Balance(),
 			IdempotentReplay: false,
 		}
 		return nil
 	})
 
 	if err != nil {
+		if errors.Is(err, errs.ErrDuplicateOperation) {
+			// Concorrência a nível de banco: uma requisição paralela comitou a mesma chave.
+			// Reabre transação para ler o snapshot persistido e retornar o replay idempotente legítimo.
+			var replayOut *ProcessWagerOutput
+			replayErr := uc.uow.WithTx(ctx, func(readTx port.DBTX) error {
+				existingTxn, getErr := uc.txnRepo.GetByIdempotencyKey(ctx, readTx, input.IdempotencyKey)
+				if getErr != nil || existingTxn == nil {
+					existingByExt, extErr := uc.txnRepo.GetByProviderAndExternalID(ctx, readTx, input.ProviderID, input.ExternalTransactionID)
+					if extErr != nil {
+						if getErr != nil {
+							return getErr
+						}
+						return extErr
+					}
+					existingTxn = existingByExt
+				}
+				if existingTxn.IdempotencyKey() == nil || *existingTxn.IdempotencyKey() != input.IdempotencyKey {
+					return errs.ErrPayloadConflict
+				}
+				if existingTxn.PayloadHash() != nil && *existingTxn.PayloadHash() != currentHash {
+					return errs.ErrPayloadConflict
+				}
+				replayOut = uc.buildReplayOutput(existingTxn)
+				return nil
+			})
+			if replayErr == nil && replayOut != nil {
+				return replayOut, nil
+			}
+		}
 		return nil, err
 	}
 	return output, nil
@@ -477,10 +513,10 @@ func (uc *ProcessWagerUseCase) buildReplayOutput(t *transaction.WagerTransaction
 		resBal = *t.ResultBalance()
 	}
 	return &ProcessWagerOutput{
-		TransactionID:   t.ID(),
-		Status:          t.Status(),
-		Balance:         resBal,
+		TransactionID:    t.ID(),
+		Status:           t.Status(),
+		Balance:          resBal,
 		IdempotentReplay: true,
-		FailureCode:     t.FailureCode(),
+		FailureCode:      t.FailureCode(),
 	}
 }

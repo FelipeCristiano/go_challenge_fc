@@ -13,14 +13,13 @@ func brl(amount int64) money.Money {
 	return money.NewFromInt64(amount, money.BRL)
 }
 
-
 func TestNew_Credit_Success(t *testing.T) {
 	entry, err := ledger.New(
 		uuid.New(), uuid.New(),
 		ledger.DirectionCredit,
-		brl(5000),   // 50.00
-		brl(10000),  // 100.00
-		brl(15000),  // 150.00
+		brl(5000),  // 50.00
+		brl(10000), // 100.00
+		brl(15000), // 150.00
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -42,7 +41,6 @@ func TestNew_Credit_Success(t *testing.T) {
 	}
 }
 
-
 func TestNew_Debit_Success(t *testing.T) {
 	entry, err := ledger.New(
 		uuid.New(), uuid.New(),
@@ -58,7 +56,6 @@ func TestNew_Debit_Success(t *testing.T) {
 		t.Errorf("expected DEBIT, got %s", entry.Direction())
 	}
 }
-
 
 func TestNew_Credit_WrongArithmetic(t *testing.T) {
 	// 100.00 + 50.00 ≠ 200.00
@@ -88,12 +85,11 @@ func TestNew_Debit_WrongArithmetic(t *testing.T) {
 	}
 }
 
-
 func TestNew_ZeroMoney(t *testing.T) {
 	_, err := ledger.New(
 		uuid.New(), uuid.New(),
 		ledger.DirectionCredit,
-		brl(0),     // ZERO — inválido
+		brl(0), // ZERO — inválido
 		brl(10000),
 		brl(10000),
 	)
@@ -106,7 +102,7 @@ func TestNew_NegativeMoney(t *testing.T) {
 	_, err := ledger.New(
 		uuid.New(), uuid.New(),
 		ledger.DirectionCredit,
-		brl(-100),  // negativo — inválido
+		brl(-100), // negativo — inválido
 		brl(10000),
 		brl(9900),
 	)
@@ -114,7 +110,6 @@ func TestNew_NegativeMoney(t *testing.T) {
 		t.Error("expected error for negative money amount")
 	}
 }
-
 
 func TestNew_InvalidDirection(t *testing.T) {
 	_, err := ledger.New(
@@ -128,7 +123,6 @@ func TestNew_InvalidDirection(t *testing.T) {
 		t.Error("expected error for invalid direction")
 	}
 }
-
 
 func TestRehydrate(t *testing.T) {
 	id, wID, tID := uuid.New(), uuid.New(), uuid.New()

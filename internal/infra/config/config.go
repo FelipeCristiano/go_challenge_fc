@@ -27,19 +27,19 @@ type DatabaseConfig struct {
 }
 
 type SQSConfig struct {
-	Endpoint           string
-	QueueURL           string
-	DLQURL             string
-	EventsQueueURL     string
-	MaxMessages        int32
-	VisibilityTimeout  int32
-	WaitTimeSeconds    int32
-	MaxRetries         int
+	Endpoint          string
+	QueueURL          string
+	DLQURL            string
+	EventsQueueURL    string
+	MaxMessages       int32
+	VisibilityTimeout int32
+	WaitTimeSeconds   int32
+	MaxRetries        int
 }
 
 type AuthConfig struct {
-	Issuer   string
-	JWKSURL  string
+	Issuer  string
+	JWKSURL string
 }
 
 type OutboxConfig struct {

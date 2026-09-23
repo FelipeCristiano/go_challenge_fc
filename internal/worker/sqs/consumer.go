@@ -37,9 +37,9 @@ type ConsumerConfig struct {
 
 // EnvelopeMessage representa a estrutura da mensagem consumida da fila SQS FIFO.
 type EnvelopeMessage struct {
-	MessageID  string          `json:"messageId"`
-	Type       string          `json:"type"`
-	OccurredAt string          `json:"occurredAt"`
+	MessageID  string           `json:"messageId"`
+	Type       string           `json:"type"`
+	OccurredAt string           `json:"occurredAt"`
 	Data       WagerMessageData `json:"data"`
 }
 

@@ -65,7 +65,6 @@ func Rehydrate(
 	}
 }
 
-
 func (w *Wallet) Debit(m money.Money) (balanceBefore money.Money, err error) {
 	if err := w.validateOperation(m); err != nil {
 		return money.Money{}, err
@@ -117,15 +116,13 @@ func (w *Wallet) Credit(m money.Money) (balanceBefore money.Money, err error) {
 	return balanceBefore, nil
 }
 
-
-func (w *Wallet) ID() uuid.UUID          { return w.id }
-func (w *Wallet) PlayerID() uuid.UUID    { return w.playerID }
+func (w *Wallet) ID() uuid.UUID            { return w.id }
+func (w *Wallet) PlayerID() uuid.UUID      { return w.playerID }
 func (w *Wallet) Currency() money.Currency { return w.currency }
-func (w *Wallet) Balance() money.Money   { return w.balance }
-func (w *Wallet) Version() int64         { return w.version }
-func (w *Wallet) CreatedAt() time.Time   { return w.createdAt }
-func (w *Wallet) UpdatedAt() time.Time   { return w.updatedAt }
-
+func (w *Wallet) Balance() money.Money     { return w.balance }
+func (w *Wallet) Version() int64           { return w.version }
+func (w *Wallet) CreatedAt() time.Time     { return w.createdAt }
+func (w *Wallet) UpdatedAt() time.Time     { return w.updatedAt }
 
 func (w *Wallet) validateOperation(m money.Money) error {
 	if m.Currency() != w.currency {
