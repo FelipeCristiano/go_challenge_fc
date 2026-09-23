@@ -42,5 +42,5 @@ vendor/
 tmp/
 
 # Arquivos gerados por sistemas operacionais
-.DS_Store
+**/.DS_Store
 Thumbs.db

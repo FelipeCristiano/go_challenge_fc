@@ -20,7 +20,7 @@ func TracingMiddleware(next http.Handler) http.Handler {
 			trace.WithSpanKind(trace.SpanKindServer),
 			trace.WithAttributes(
 				attribute.String("http.method", r.Method),
-				attribute.String("http.url", r.URL.String()),
+				attribute.String("http.target", r.URL.Path),
 				attribute.String("http.user_agent", r.UserAgent()),
 			),
 		)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
+	"time"
 
 	awssqs "github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/felipecristiano/desafio/internal/application/port"
@@ -17,14 +19,26 @@ type SQSPinger interface {
 type HealthHandler struct {
 	pool port.DBTX
 	sqs  SQSPinger
+
+	mu           sync.RWMutex
+	lastSQSCheck time.Time
+	lastSQSErr   error
+	sqsCacheTTL  time.Duration
 }
 
 func NewHealthHandler(pool port.DBTX) *HealthHandler {
-	return &HealthHandler{pool: pool}
+	return &HealthHandler{
+		pool:        pool,
+		sqsCacheTTL: 15 * time.Second,
+	}
 }
 
 func NewHealthHandlerWithSQS(pool port.DBTX, sqs SQSPinger) *HealthHandler {
-	return &HealthHandler{pool: pool, sqs: sqs}
+	return &HealthHandler{
+		pool:        pool,
+		sqs:         sqs,
+		sqsCacheTTL: 15 * time.Second,
+	}
 }
 
 func (h *HealthHandler) Live(w http.ResponseWriter, r *http.Request) {
@@ -51,17 +65,36 @@ func (h *HealthHandler) Ready(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Testa conectividade real com SQS (se configurado)
+	// 2. Testa conectividade real com SQS (se configurado, com cache TTL para evitar throttling da AWS)
 	if h.sqs != nil {
-		maxResults := int32(1)
-		_, sqsErr := h.sqs.ListQueues(r.Context(), &awssqs.ListQueuesInput{MaxResults: &maxResults})
-		if sqsErr != nil {
+		h.mu.RLock()
+		cachedErr := h.lastSQSErr
+		expired := time.Since(h.lastSQSCheck) > h.sqsCacheTTL
+		h.mu.RUnlock()
+
+		if expired {
+			h.mu.Lock()
+			if time.Since(h.lastSQSCheck) > h.sqsCacheTTL {
+				maxResults := int32(1)
+				checkCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+				_, err := h.sqs.ListQueues(checkCtx, &awssqs.ListQueuesInput{MaxResults: &maxResults})
+				cancel()
+				h.lastSQSErr = err
+				h.lastSQSCheck = time.Now()
+				cachedErr = err
+			} else {
+				cachedErr = h.lastSQSErr
+			}
+			h.mu.Unlock()
+		}
+
+		if cachedErr != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status":   "DOWN",
 				"database": "READY",
 				"sqs":      "UNAVAILABLE",
-				"error":    sqsErr.Error(),
+				"error":    cachedErr.Error(),
 			})
 			return
 		}
