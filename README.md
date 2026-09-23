@@ -111,6 +111,9 @@ go test -v -tags=integration ./internal/application/usecase/...
 
 # Executar apenas testes de integração dos repositórios pgx:
 go test -v -tags=integration ./internal/infra/db/postgres/...
+
+# Executar testes de integração da API HTTP e roteamento:
+go test -v -tags=integration ./internal/http/...
 ```
 
 ### 5. Cenário de Execução com Múltiplas Instâncias
