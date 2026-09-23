@@ -238,15 +238,17 @@ curl -s -X POST http://localhost:3000/wagering/transactions \
 ### 5.4. Consultas e Auditoria
 
 #### Consulta de Saldo e Versão da Carteira (`GET /wallets/:walletId`):
+Requer papel `internal` (operações de carteira são restritas ao serviço interno):
 ```sh
 curl -s http://localhost:3000/wallets/<WALLET_ID> \
-  -H "Authorization: Bearer $PROVIDER_A_TOKEN" | jq
+  -H "Authorization: Bearer $INTERNAL_TOKEN" | jq
 ```
 
 #### Extrato Auditável do Ledger (`GET /wallets/:walletId/ledger`):
+Requer papel `internal`:
 ```sh
 curl -s "http://localhost:3000/wallets/<WALLET_ID>/ledger?limit=20" \
-  -H "Authorization: Bearer $PROVIDER_A_TOKEN" | jq
+  -H "Authorization: Bearer $INTERNAL_TOKEN" | jq
 ```
 
 #### Reconciliação Financeira (`POST /wallets/:walletId/reconciliation`):

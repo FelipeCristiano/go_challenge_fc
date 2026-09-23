@@ -200,18 +200,8 @@ func (h *WagerHandler) GetTransactionByID(w http.ResponseWriter, r *http.Request
 			return errs.New("forbidden", "unauthorized provider access")
 		}
 
-		resBal := t.Money()
-		if t.ResultBalance() != nil {
-			resBal = *t.ResultBalance()
-		}
-
-		txnResp = &WagerResponse{
-			TransactionID:    t.ID().String(),
-			Status:           string(t.Status()),
-			Balance:          MoneyDTO{Amount: resBal.String(), Currency: string(resBal.Currency())},
-			IdempotentReplay: false,
-			FailureCode:      t.FailureCode(),
-		}
+		resp := toWagerResponse(t)
+		txnResp = &resp
 		return nil
 	})
 
@@ -244,18 +234,8 @@ func (h *WagerHandler) GetTransactionByProviderAndExternalID(w http.ResponseWrit
 			return err
 		}
 
-		resBal := t.Money()
-		if t.ResultBalance() != nil {
-			resBal = *t.ResultBalance()
-		}
-
-		txnResp = &WagerResponse{
-			TransactionID:    t.ID().String(),
-			Status:           string(t.Status()),
-			Balance:          MoneyDTO{Amount: resBal.String(), Currency: string(resBal.Currency())},
-			IdempotentReplay: false,
-			FailureCode:      t.FailureCode(),
-		}
+		resp := toWagerResponse(t)
+		txnResp = &resp
 		return nil
 	})
 
@@ -269,4 +249,18 @@ func (h *WagerHandler) GetTransactionByProviderAndExternalID(w http.ResponseWrit
 	}
 
 	writeJSON(w, http.StatusOK, txnResp)
+}
+
+func toWagerResponse(t *transaction.WagerTransaction) WagerResponse {
+	resBal := t.Money()
+	if t.ResultBalance() != nil {
+		resBal = *t.ResultBalance()
+	}
+	return WagerResponse{
+		TransactionID:    t.ID().String(),
+		Status:           string(t.Status()),
+		Balance:          MoneyDTO{Amount: resBal.String(), Currency: string(resBal.Currency())},
+		IdempotentReplay: false,
+		FailureCode:      t.FailureCode(),
+	}
 }

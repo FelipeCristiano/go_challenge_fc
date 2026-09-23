@@ -286,3 +286,33 @@ func TestPredicates(t *testing.T) {
 		t.Error("negative predicates failed")
 	}
 }
+
+func BenchmarkNewFromExternalString(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, err := money.NewFromExternalString("12345.67", money.BRL)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkMoney_Add(b *testing.B) {
+	m1 := money.NewFromInt64(10000, money.BRL)
+	m2 := money.NewFromInt64(2500, money.BRL)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, err := m1.Add(m2)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkMoney_String(b *testing.B) {
+	m := money.NewFromInt64(1234567, money.BRL)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = m.String()
+	}
+}

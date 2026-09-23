@@ -258,13 +258,13 @@ func runLoadTest(
 				// - 10% replays idempotentes idênticos (mesma chave e mesmo payload)
 				// - 3% disputas de saldo insuficiente (wallet de R$ 15,00 recebendo aposta de R$ 20,00)
 				// - 2% conflitos intencionais de payload (mesma chave, corpo diferente)
-				r := rand.Float64()
-				if r < 0.10 {
-					// Replay Idempotente
+				percent := rand.Intn(100)
+				if percent < 10 {
+					// Replay Idempotente (10%)
 					idempotencyKey = reusableKey
 					payload = reusablePayload
-				} else if r < 0.12 {
-					// Conflito de Idempotência (mesma chave, payload modificado)
+				} else if percent < 12 {
+					// Conflito de Idempotência (2%: mesma chave, payload modificado)
 					idempotencyKey = reusableKey
 					payload = map[string]any{
 						"providerId":            "provider-a",
@@ -279,8 +279,8 @@ func runLoadTest(
 							"currency": "BRL",
 						},
 					}
-				} else if r < 0.15 {
-					// Saldo Insuficiente
+				} else if percent < 15 {
+					// Saldo Insuficiente (3%)
 					txID := fmt.Sprintf("tx-lowbal-%s", uuid.New().String()[:8])
 					idempotencyKey = fmt.Sprintf("provider-a:%s", txID)
 					payload = map[string]any{

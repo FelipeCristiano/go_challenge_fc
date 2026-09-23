@@ -19,6 +19,7 @@ func NewRouter(
 
 	// Middlewares globais essenciais
 	r.Use(chimiddleware.Recoverer)
+	r.Use(middleware.SecurityHeadersMiddleware)
 	r.Use(middleware.CorrelationMiddleware)
 	r.Use(middleware.TracingMiddleware)
 	r.Use(middleware.LoggingMiddleware)

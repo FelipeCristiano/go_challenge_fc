@@ -248,33 +248,26 @@ func registerLifecycleHooks(
 			}
 
 			// 2. Finaliza workers em background em paralelo com drain
+			workers := []struct {
+				name string
+				stop func(context.Context) error
+			}{
+				{"sqs consumer", sqsConsumer.Stop},
+				{"outbox worker", outboxWorker.Stop},
+				{"pending references worker", pendingRefWorker.Stop},
+			}
+
 			var wg sync.WaitGroup
-			wg.Add(3)
-
-			go func() {
-				defer wg.Done()
-				slog.Info("stopping sqs consumer")
-				if err := sqsConsumer.Stop(shutdownCtx); err != nil {
-					slog.Warn("sqs consumer stop error", "error", err)
-				}
-			}()
-
-			go func() {
-				defer wg.Done()
-				slog.Info("stopping outbox worker")
-				if err := outboxWorker.Stop(shutdownCtx); err != nil {
-					slog.Warn("outbox worker stop error", "error", err)
-				}
-			}()
-
-			go func() {
-				defer wg.Done()
-				slog.Info("stopping pending references worker")
-				if err := pendingRefWorker.Stop(shutdownCtx); err != nil {
-					slog.Warn("pending references worker stop error", "error", err)
-				}
-			}()
-
+			wg.Add(len(workers))
+			for _, w := range workers {
+				go func(name string, stopFn func(context.Context) error) {
+					defer wg.Done()
+					slog.Info("stopping " + name)
+					if err := stopFn(shutdownCtx); err != nil {
+						slog.Warn(name+" stop error", "error", err)
+					}
+				}(w.name, w.stop)
+			}
 			wg.Wait()
 
 			slog.Info("application shutdown complete")

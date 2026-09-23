@@ -260,7 +260,7 @@ O encerramento ordenado é gerenciado pelos hooks de `fx.Lifecycle`:
   - `reconciliation_divergences_total`: Total de divergências financeiras detectadas por moeda (`currency`).
 - **Health Checks**:
   - `GET /health/live`: Liveness do processo Go (status `UP`).
-  - `GET /health/ready`: Readiness validando conectividade de infraestrutura com PostgreSQL (`SELECT 1`) e AWS SQS (`ListQueues`). Retorna status `UP` com `database: READY` e `sqs: READY`.
+  - `GET /health/ready`: Readiness validando conectividade de infraestrutura com PostgreSQL (`SELECT 1`) e AWS SQS (`ListQueues` com cache TTL de 15 segundos para mitigar rate limiting e throttling da AWS). Retorna status `UP` com `database: READY` e `sqs: READY`.
 - **Tracing Distribuído com OpenTelemetry (Diferencial Opcional)**:
   - Instrumentação nativa via `go.opentelemetry.io/otel` e `go.opentelemetry.io/otel/trace`.
   - Spans HTTP de entrada no servidor gerados em `internal/http/middleware/tracing.go` propagando o contexto W3C e identificadores de rastreabilidade (`app.correlation_id`).
