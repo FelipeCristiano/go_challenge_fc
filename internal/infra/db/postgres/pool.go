@@ -7,14 +7,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// NewPool cria e valida um pool de conexões pgx.
+// cria e valida um pool de conexões pgx.
 func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: parse config: %w", err)
 	}
 
-	// Configurações mínimas de pool
 	cfg.MaxConns = 25
 	cfg.MinConns = 2
 

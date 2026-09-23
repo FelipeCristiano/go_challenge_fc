@@ -1,5 +1,5 @@
 #!/bin/sh
-# LocalStack init script — provisiona as filas SQS FIFO
+# LocalStack init script — filas SQS FIFO
 set -e
 
 echo "==> Criando filas SQS FIFO..."
@@ -20,7 +20,7 @@ awslocal sqs create-queue \
   }' \
   --region us-east-1
 
-# Fila de eventos de saída (outbox publica aqui)
+# outbox-events.fifo
 awslocal sqs create-queue \
   --queue-name wager-events.fifo \
   --attributes FifoQueue=true,ContentBasedDeduplication=false \

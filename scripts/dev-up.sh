@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# ==============================================================
-# Inicializa o ambiente local completo de desenvolvimento.
-# Uso: ./scripts/dev-up.sh
-# ==============================================================
+# Inicializa o ambiente
+# ./scripts/dev-up.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,7 +15,6 @@ until docker compose -f "$ROOT_DIR/docker-compose.yml" exec postgres \
   sleep 2
 done
 
-# Cria banco de dados para o Keycloak caso não exista
 echo "==> Criando banco keycloak (se não existir)..."
 docker compose -f "$ROOT_DIR/docker-compose.yml" exec postgres \
   psql -U desafio -tc "SELECT 1 FROM pg_database WHERE datname = 'keycloak'" | \

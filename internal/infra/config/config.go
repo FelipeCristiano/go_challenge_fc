@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Config contém todas as configurações da aplicação lidas de variáveis de ambiente.
+// configurações da aplicação
 type Config struct {
 	HTTP       HTTPConfig
 	Database   DatabaseConfig
@@ -58,7 +58,7 @@ type ShutdownConfig struct {
 	Timeout time.Duration
 }
 
-// Load lê e valida a configuração das variáveis de ambiente.
+// lê e valida a configuração
 func Load() (*Config, error) {
 	cfg := &Config{
 		HTTP: HTTPConfig{

@@ -9,7 +9,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
 
-// RunMigrations aplica todas as migrations pendentes.
+// aplica migrations pendentes.
 func RunMigrations(ctx context.Context, databaseURL, migrationsPath string) error {
 	m, err := migrate.New("file://"+migrationsPath, databaseURL)
 	if err != nil {

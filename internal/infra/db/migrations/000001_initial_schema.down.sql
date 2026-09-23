@@ -1,4 +1,4 @@
--- Reversão da migration 000001_initial_schema
+-- reversão da migration 000001_initial_schema
 DROP TABLE IF EXISTS outbox_events;
 DROP TABLE IF EXISTS inbox_messages;
 DROP RULE IF EXISTS wallet_ledger_no_delete ON wallet_ledger_entries;
