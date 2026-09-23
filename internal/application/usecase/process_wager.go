@@ -115,17 +115,7 @@ func (uc *ProcessWagerUseCase) Execute(ctx context.Context, input ProcessWagerIn
 				// Reentrega via SQS: verifica se a transação de negócio já existe
 				existingTxn, err := uc.txnRepo.GetByIdempotencyKey(ctx, tx, input.IdempotencyKey)
 				if err == nil && existingTxn != nil {
-					resBal := existingTxn.Money()
-					if existingTxn.ResultBalance() != nil {
-						resBal = *existingTxn.ResultBalance()
-					}
-					output = &ProcessWagerOutput{
-						TransactionID:   existingTxn.ID(),
-						Status:          existingTxn.Status(),
-						Balance:         resBal,
-						IdempotentReplay: true,
-						FailureCode:     existingTxn.FailureCode(),
-					}
+					output = uc.buildReplayOutput(existingTxn)
 					return nil
 				}
 			}
@@ -140,17 +130,7 @@ func (uc *ProcessWagerUseCase) Execute(ctx context.Context, input ProcessWagerIn
 			}
 
 			// Replay idempotente: retorna o resultado original persistido
-			resBal := existingTxn.Money()
-			if existingTxn.ResultBalance() != nil {
-				resBal = *existingTxn.ResultBalance()
-			}
-			output = &ProcessWagerOutput{
-				TransactionID:   existingTxn.ID(),
-				Status:          existingTxn.Status(),
-				Balance:         resBal,
-				IdempotentReplay: true,
-				FailureCode:     existingTxn.FailureCode(),
-			}
+			output = uc.buildReplayOutput(existingTxn)
 			return nil
 		} else if err != nil && !errors.Is(err, errs.ErrTransactionNotFound) {
 			return err
@@ -471,4 +451,18 @@ func (uc *ProcessWagerUseCase) rejectTransaction(
 		return err
 	}
 	return uc.outboxRepo.Create(ctx, tx, outRej)
+}
+
+func (uc *ProcessWagerUseCase) buildReplayOutput(t *transaction.WagerTransaction) *ProcessWagerOutput {
+	resBal := t.Money()
+	if t.ResultBalance() != nil {
+		resBal = *t.ResultBalance()
+	}
+	return &ProcessWagerOutput{
+		TransactionID:   t.ID(),
+		Status:          t.Status(),
+		Balance:         resBal,
+		IdempotentReplay: true,
+		FailureCode:     t.FailureCode(),
+	}
 }

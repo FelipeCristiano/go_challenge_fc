@@ -56,8 +56,9 @@ O sistema implementa uma arquitetura distribuída resiliente a falhas e orientad
 - **Justificativa**: O Keycloak é um IdP de padrão aberto amplamente adotado na indústria, compatível com as especificações OAuth 2.0 e OpenID Connect (OIDC). Oferece suporte nativo ao fluxo `client_credentials` para autenticação máquina-a-máquina (M2M) entre os provedores de jogos e o backend, além de permitir o provisionamento declarativo via importação automática de realm (`desafio-realm.json`), viabilizando inicialização limpa e determinística nos testes e ambientes locais.
 - **Fora do escopo**: Cadastro de usuários/senhas e emissão própria de tokens JWT são delegados inteiramente ao IdP.
 
-### 2.2. Validação de Credenciais
+### 2.2. Validação de Credenciais e Cache JWKS
 - O serviço backend não compartilha credenciais secretas para validar tokens: a verificação de autenticidade dos tokens JWT é realizada de forma assimétrica e sem estado através do endpoint público **JWKS (JSON Web Key Set)** (`/protocol/openid-connect/certs`).
+- **Cache em Memória com `sync.RWMutex`**: Para evitar sobrecarga de chamadas de rede ao Keycloak a cada requisição HTTP, o validador (`KeycloakValidator`) mantém um cache das chaves públicas RSA indexadas por `kid` com TTL de 15 minutos e suporte a concorrência via double-checked locking (`sync.RWMutex`).
 - O middleware de autenticação valida assinatura, expiração (`exp`), emissor (`iss`) e audiência antes de repassar a requisição aos handlers de negócio.
 
 ### 2.3. Modelo de Permissões e Isolamento de Provedores
@@ -153,12 +154,27 @@ A solução implementa idempotência durável em 3 níveis:
 1. **Unicidade no Banco de Dados**:
    - `UNIQUE (idempotency_key)`: Garante que nenhuma operação com a mesma chave seja processada duas vezes.
    - `UNIQUE (provider_id, external_transaction_id)`: Impede que a mesma transação externa seja cadastrada sob chaves de idempotência diferentes.
-2. **Hash Canônico de Payload**:
+2. **Hash Canônico de Payload (`CanonicalPayloadHash`)**:
    - É gerado o SHA-256 de um JSON ordenado lexicograficamente com os campos de negócio (`providerId`, `externalTransactionId`, `playerId`, `walletId`, `roundId`, `gameId`, `kind`, `money`).
-   - Se uma chave existente for reenviada com payload diferente, o sistema retorna `409 Conflict`.
+   - Garante que a representação seja estritamente determinística tanto para requisições vindas da **API HTTP** quanto para mensagens consumidas do **SQS FIFO**, independentemente da ordem em que os campos foram enviados pelo cliente.
+   - Metadados de transporte (`Idempotency-Key`, `X-Correlation-ID`, headers SQS) são excluídos do cálculo do hash.
+   - Se uma chave existente for reenviada com payload diferente, o sistema retorna `409 Conflict` (`ErrPayloadConflict`).
 3. **Replay Idempotente com Saldo Histórico**:
    - Ao detectar reenvio de operação já processada (`PROCESSED`), a aplicação devolve o snapshot exato gravado em `result_balance_amount` da transação original, mesmo que a carteira tenha tido outras movimentações posteriores.
-   - O campo `idempotentReplay: true` é retornado.
+   - O campo `idempotentReplay: true` é retornado com status `200 OK`.
+
+### 6.1. Mapeamento de Códigos de Status HTTP
+
+| Código | Cenário de Resposta |
+|---|---|
+| **`200 OK`** | Operação financeira processada com sucesso (`PROCESSED`) ou Replay Idempotente (`idempotentReplay: true`). |
+| **`201 Created`** | Carteira aberta com sucesso (`POST /wallets`). |
+| **`202 Accepted`** | Reversão criada em estado de espera (`PENDING_REFERENCE`). |
+| **`400 Bad Request`** | Erro de parsing em `Money` (ex.: float, notação científica), campos obrigatórios ausentes ou payload inválido. |
+| **`401 Unauthorized`** | Cabeçalho `Authorization` ausente, token malformado, expirado ou com assinatura inválida pelo JWKS. |
+| **`403 Forbidden`** | Tenant mismatch (token de `provider-a` tentando operar em nome de `provider-b`), ausência do papel necessário (`internal`) ou tentativa externa de submeter transação `OPENING`. |
+| **`404 Not Found`** | Carteira ou transação inexistente. |
+| **`409 Conflict`** | Conflito de payload para a mesma chave de idempotência (`ErrPayloadConflict`) ou tentativa de criar carteira duplicada para o mesmo jogador e moeda (`ErrWalletAlreadyExists`). |
 
 ---
 
@@ -185,11 +201,13 @@ A solução implementa idempotência durável em 3 níveis:
 
 ## 8. Inbox e Outbox Patterns
 
-### 8.1. Inbox Pattern (Consumidor SQS)
+### 8.1. Inbox Pattern e Consumo SQS FIFO
 - A tabela `inbox_messages` possui restrição única `UNIQUE (consumer_name, message_id)`.
-- No consumo do SQS, a inserção na inbox ocorre dentro da mesma transação do domínio.
+- No consumo do SQS, a inserção na inbox ocorre dentro da mesma transação do domínio (`port.UnitOfWork`).
 - Mensagens reentregues pelo broker com o mesmo `messageId` são identificadas e não duplicam operações financeiras.
-- A mensagem só é deletada do SQS (`DeleteMessage`) após o commit com sucesso da transação no PostgreSQL.
+- **Remoção Pós-Commit (`DeleteMessage`)**: A exclusão da mensagem na fila SQS só é invocada **após** a conclusão e o commit bem-sucedido de toda a transação no PostgreSQL. Caso o processo seja interrompido abruptamente ou a transação sofra rollback, a mensagem permanece intacta na fila e será reprocessada com segurança por outra instância.
+- **Liberação Imediata de Visibilidade (`ChangeMessageVisibility(0)`)**: Em caso de falhas transitórias de infraestrutura (ex.: indisponibilidade momentânea de banco), o consumidor zera o timeout de visibilidade da mensagem, disponibilizando-a imediatamente para redrive sem bloquear o pipeline até atingir o limite de DLQ (`wager-transactions-dlq.fifo`).
+- **Tratamento de Poison Pills**: Mensagens com formato JSON irrecuperável ou erros de domínio irreversíveis (`PAYLOAD_CONFLICT`, `OPENING_FORBIDDEN`) são removidas da fila com log de auditoria para evitar loops infinitos.
 
 ### 8.2. Transactional Outbox Pattern (Publicador de Eventos)
 - Eventos de domínio são persistidos na tabela `outbox_events` na mesma transação SQL que altera o saldo e grava o ledger.
@@ -256,8 +274,8 @@ O encerramento ordenado é gerenciado pelos hooks de `fx.Lifecycle`:
    - [x] Fase 3: Persistência (`pgx/v5`, Repositórios SQL, Unit of Work, Testes de Integração)
    - [x] Fase 4: Casos de uso (`OpenWallet`, `ProcessWager`, `ReconcileWallet`, `RetryPendingReferences`)
    - [x] Fase 5: API HTTP e Handlers (`chi`, autenticação OIDC/JWKS, autorização por role/providerId, health checks)
+   - [x] Fase 6: Consumidor SQS (Worker FIFO assíncrono, deduplicação Inbox, remoção pós-commit, liberação de visibilidade)
 5. **Trabalho a Seguir**:
-   - [ ] Fase 6: Consumidor SQS
    - [ ] Fase 7: Outbox Worker
    - [ ] Fase 8: Composição Fx
    - [ ] Fase 9: Observabilidade completa

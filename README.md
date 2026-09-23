@@ -114,6 +114,9 @@ go test -v -tags=integration ./internal/infra/db/postgres/...
 
 # Executar testes de integração da API HTTP e roteamento:
 go test -v -tags=integration ./internal/http/...
+
+# Executar testes de integração do Consumidor SQS FIFO:
+go test -v -tags=integration ./internal/worker/sqs/...
 ```
 
 ### 5. Cenário de Execução com Múltiplas Instâncias
