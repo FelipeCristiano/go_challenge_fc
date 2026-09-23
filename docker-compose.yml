@@ -1,4 +1,3 @@
-version: "3.9"
 
 services:
   postgres:
@@ -68,10 +67,7 @@ services:
     container_name: desafio-migrate
     volumes:
       - ./internal/infra/db/migrations:/migrations
-    command: >
-      -path=/migrations
-      -database=postgres://desafio:desafio@postgres:5432/desafio?sslmode=disable
-      up
+    command: ["-path=/migrations", "-database=postgres://desafio:desafio@postgres:5432/desafio?sslmode=disable", "up"]
     depends_on:
       postgres:
         condition: service_healthy
