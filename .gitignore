@@ -41,6 +41,9 @@ vendor/
 *.log
 tmp/
 
-# Arquivos gerados por sistemas operacionais.
+# Arquivos gerados por sistemas operacionais
 **/.DS_Store
 Thumbs.db
+
+# Arquivo .md do Desafio
+DESAFIO.md
