@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// configurações da aplicação
+// Config armazena as configurações da aplicação carregadas do ambiente.
 type Config struct {
 	HTTP       HTTPConfig
 	Database   DatabaseConfig
@@ -59,7 +59,7 @@ type ShutdownConfig struct {
 	Timeout time.Duration
 }
 
-// lê e valida a configuração
+// Load lê e valida as variáveis de ambiente da aplicação.
 func Load() (*Config, error) {
 	loadDotEnv()
 

@@ -9,14 +9,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// pgxUnitOfWork implementa port.UnitOfWork usando pgxpool.
 type pgxUnitOfWork struct {
 	pool *pgxpool.Pool
 }
 
+// NewUnitOfWork cria uma nova instância de UnitOfWork para PostgreSQL.
 func NewUnitOfWork(pool *pgxpool.Pool) port.UnitOfWork {
 	return &pgxUnitOfWork{pool: pool}
 }
 
+// WithTx executa uma função dentro de uma transação com isolamento ReadCommitted.
 func (u *pgxUnitOfWork) WithTx(ctx context.Context, fn func(tx port.DBTX) error) error {
 	tx, err := u.pool.BeginTx(ctx, pgx.TxOptions{
 		IsoLevel: pgx.ReadCommitted,
