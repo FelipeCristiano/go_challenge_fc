@@ -1,0 +1,111 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: desafio-postgres
+    environment:
+      POSTGRES_USER: desafio
+      POSTGRES_PASSWORD: desafio
+      POSTGRES_DB: desafio
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U desafio -d desafio"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: desafio-keycloak
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: desafio
+      KC_DB_PASSWORD: desafio
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./scripts/keycloak:/opt/keycloak/data/import
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health/ready || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
+  localstack:
+    image: localstack/localstack:3.4
+    container_name: desafio-localstack
+    environment:
+      SERVICES: sqs
+      DEFAULT_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      LOCALSTACK_HOST: localstack
+      EAGER_SERVICE_LOADING: 1
+    ports:
+      - "4566:4566"
+    volumes:
+      - ./scripts/localstack:/etc/localstack/init/ready.d
+      - localstack_data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health | grep -q '\"sqs\": \"running\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    image: migrate/migrate:v4.17.1
+    container_name: desafio-migrate
+    volumes:
+      - ./internal/infra/db/migrations:/migrations
+    command: >
+      -path=/migrations
+      -database=postgres://desafio:desafio@postgres:5432/desafio?sslmode=disable
+      up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - migrate
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: desafio-app
+    environment:
+      DATABASE_URL: postgres://desafio:desafio@postgres:5432/desafio?sslmode=disable
+      SQS_ENDPOINT: http://localstack:4566
+      SQS_QUEUE_URL: http://localstack:4566/000000000000/wager-transactions.fifo
+      SQS_DLQ_URL: http://localstack:4566/000000000000/wager-transactions-dlq.fifo
+      KEYCLOAK_ISSUER: http://keycloak:8080/realms/desafio
+      KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/desafio/protocol/openid-connect/certs
+      HTTP_PORT: 3000
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    profiles:
+      - app
+
+volumes:
+  postgres_data:
+  localstack_data:

@@ -1,0 +1,88 @@
+{
+  "id": "desafio",
+  "realm": "desafio",
+  "enabled": true,
+  "displayName": "Desafio Backend",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "clients": [
+    {
+      "clientId": "desafio-internal",
+      "name": "Desafio Internal Service",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "internal-secret",
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "access.token.lifespan": "300"
+      }
+    },
+    {
+      "clientId": "provider-a",
+      "name": "Provider A",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "provider-a-secret",
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "access.token.lifespan": "300"
+      }
+    },
+    {
+      "clientId": "provider-b",
+      "name": "Provider B",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "provider-b-secret",
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "access.token.lifespan": "300"
+      }
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "provider",
+        "description": "External game provider role"
+      },
+      {
+        "name": "internal",
+        "description": "Internal service role"
+      }
+    ]
+  },
+  "clientScopeMappings": {},
+  "protocolMappers": [],
+  "scopeMappings": [
+    {
+      "client": "provider-a",
+      "roles": ["provider"]
+    },
+    {
+      "client": "provider-b",
+      "roles": ["provider"]
+    },
+    {
+      "client": "desafio-internal",
+      "roles": ["internal"]
+    }
+  ]
+}
